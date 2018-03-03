@@ -1,0 +1,114 @@
+
+===========================================================
+KVS OPERATIONS -- GET & PUT (leave DELETE as the last thing)
+
+---------------------
+GET
+  * request format "/kvs?key=<keyname>&causal_payload=<payload>"
+    -> update query string parser
+
+  * reply format
+    {
+        "msg":"success",
+        "value":1,
+        "partition_id": 3, %% TO ADD
+        "causal_payload": "1.0.0.4", %% TO ADD
+        "timestamp": "1256953732" %% TO ADD
+    }
+    
+  * function call to the backend module passing key and causal_payload passed as query string
+    RETURNS partition_id, causal_payload, timestamp
+
+---------------------
+PUT
+  * request format "/kvs" -d "causal_payload=<payload>&key=<keyname>&value=<val>"
+    -> update body parser
+
+  * reply format %% TODO replaced ?
+    {
+        "msg":"success",
+        "partition_id": 3,
+        "causal_payload": "1.0.0.4",
+        "timestamp": "1256953732"
+    }
+
+  * same as above
+
+===========================================================
+CONSISTENT HASHING
+
+note: 'token' and 'virtual partition' are used interchangeably
+
+Lab3: nodes (virtual nodes) and keys are hashed
+Lab4: partitions (virtual partitions) and keys are hashed
+
+N = number of nodes
+K = number of replicas per node
+P = number of partitions = ceil(N/K)  --> the last partition may have less than K nodes
+T = number of tokens per partition (virtual partitions)
+
+
+On initialization we are given the view
+* compute P
+* split P in T virtual partitions and hash them
+* assign node to partition
+
+VIEW RECORD data type changes a bit
+partition_id -> the partition this node belongs to
+partitions -> a map mapping each partition to at most K nodes
+tokens     -> virtual partitions in the form {hash, partitionID}
+tokens_per_node -> T
+
+the algorithm works in a similar way.
+
+if a node is removed however, we should not move the keys
+unless it is the last one of the partition -- TODO ask confirmation
+
+when all nodes from a partition are deleted, move its keys to
+the successor in the ring
+
+=================================================================
+VIEW UPDATE - ADD
+
+when a new node is added to the system
+  scenario 1 -- all partitions have already K nodes
+     * create a new partition with just one node
+     * tokenize the partition
+     * move the keys
+  scenario 2 -- at least one partition has less than K nodes
+     * add the node to the partition with min number of nodes
+     * replicate the keys to the new node
+
+reply format
+    {
+        "msg":"success",
+        "partition_id": 2,
+        "number_of_partitions":3
+    }
+
+=================================================================
+VIEW UPDATE - REMOVE
+
+when a node is deleted from the system
+  scenario 1 -- the node is the last one of the partition 
+     * move all the key to neighbours virtual partitions
+     * delete the node and the partition (with all tokens) the keys
+  scenario 2 -- there are more nodes in the partition 
+     * delete the node
+
+reply format
+    {
+        "msg":"success",
+        "number_of_partitions":3
+    }
+
+=================================================================
+OBTAINING PARTITION INFORMATION
+
+GET request "/kvs/get_partition_id"
+GET request "/kvs/get_all_partition_ids"
+GET request "/kvs/get_partition_members?partition_id=1"
+
+=================================================================
+Change all error responses
+

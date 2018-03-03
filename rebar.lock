@@ -1,0 +1,14 @@
+{"1.1.0",
+[{<<"cowboy">>,{pkg,<<"cowboy">>,<<"2.2.0">>},0},
+ {<<"cowlib">>,{pkg,<<"cowlib">>,<<"2.1.0">>},1},
+ {<<"jsx">>,
+  {git,"https://github.com/talentdeficit/jsx.git",
+       {ref,"3074d4865b3385a050badf7828ad31490d860df5"}},
+  0},
+ {<<"ranch">>,{pkg,<<"ranch">>,<<"1.4.0">>},1}]}.
+[
+{pkg_hash,[
+ {<<"cowboy">>, <<"5233ED78AFE96B19EFD33B7BBCAFD15E064B187C0C131C61D50FE69D88DC76FD">>},
+ {<<"cowlib">>, <<"F73658B93DD043AF40400C3E4FD997068EBD0C617F8C8F4CD003A1A78EBF94F5">>},
+ {<<"ranch">>, <<"10272F95DA79340FA7E8774BA7930B901713D272905D0012B06CA6D994F8826B">>}]}
+].
