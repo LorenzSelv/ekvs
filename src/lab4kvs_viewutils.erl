@@ -4,10 +4,11 @@
 -module(lab4kvs_viewutils).
 
 -export([hash/1]).
--export([gen_nodes/1]).
--export([gen_node/1]).
+-export([get_node_name/1]).
+-export([get_partition_id/2]).
+-export([gen_partitions/2]).
 -export([gen_tokens/2]).
--export([gen_tokens_node/2]).
+-export([gen_tokens_partition/2]).
 -export([get_key_owner/2]).
 -export([get_prev/2]).
 -export([get_next/2]).
@@ -15,6 +16,7 @@
 -export([delete_token/2]).
 
 %% unitest functions
+-export([test_common/0]).
 -export([test_keyowner/0]).
 -export([test_prev/0]).
 -export([test_wraparound/0]).
@@ -28,41 +30,59 @@ hash(String) ->
     BinHash = crypto:hash(?HASHALGO, String),
     binary:decode_unsigned(BinHash) rem ?HASHMOD.
 
-gen_nodes(none) -> [];
-gen_nodes(IPPortListStr) ->
-    %% Given a comma separated list of ip:port
-    %%   e.g. "10.0.0.20:8080,10.0.0.21:8080"
-    %% Return the list of node names in the format node@<ip>
-    %%   e.g. ['node@10.0.0.20', 'node@10.0.0.21'] 
-    %%
-    %% Notes: node is given as default name
-    %%       the single quotes represent an atom
-    %% 
-    IPPortList = string:split(IPPortListStr, ",", all), 
-    lists:map(fun gen_node/1, IPPortList).
 
-gen_node(IPPort) ->
-    %% Same as above, but just for one ip:port
+get_node_name(IPPort) ->
+    %% Given a string "<ip>:<port>" return an atom 'node@<ip>'
     [IP, _Port] = string:split(IPPort, ":", all),
     list_to_atom("node@" ++ IP).
 
-gen_tokens(none, _) -> [];
-gen_tokens(IPPortListStr, TokensPerNode) ->
-    %% Given a comma separated list of ip:port
-    %%   e.g. "10.0.0.20:8080,10.0.0.21:8080"
-    %% Return the list of tokens in the format {<hash>, node@<ip>}
-    %% For each Node `TokensPerNode` tokens are generated.
-    %%
-    Nodes = gen_nodes(IPPortListStr),
-    ListOfListOfTokens = [gen_tokens_node(Node, TokensPerNode) || Node <- Nodes],
-    lists:append(ListOfListOfTokens).     
-        
 
-gen_tokens_node(Node, TokensPerNode) ->
-    NodeStr = atom_to_list(Node),
-    TokenNums = lists:map(fun integer_to_list/1, lists:seq(1, TokensPerNode)),
+get_partition_id(_Node, []) -> -1;
+
+get_partition_id(Node, [{ID, Nodes}|Parts]) -> 
+    case lists:member(Node, Nodes) of 
+        true -> ID; 
+        false -> get_partition_id(Node, Parts)
+    end;
+
+get_partition_id(Node, Partitions) ->
+    get_partition_id(Node, maps:to_list(Partitions)).
+
+
+gen_partitions(none, _) -> maps:new();
+gen_partitions(IPPortListStr, K) ->
+    %% Given a comma separated list of ip:port and the number of replicas per partition (K)
+    %%   e.g. "10.0.0.20:8080,10.0.0.21:8080", K=2
+    %% Return the map of partitions in the format {partition_id => list of nodes}
+    %%   e.g. {0 => ['node@10.0.0.20', 'node@10.0.0.21']}
+    %%
+    %% Notes: node is given as default name, the single quotes represent an atom
+    %% 
+    IPPortList = string:split(IPPortListStr, ",", all),
+    NodeList = lists:map(fun get_node_name/1, IPPortList), 
+    N = length(NodeList), 
+    GenPartition = fun(Start, Partitions) ->
+                           PartID = (Start - 1) div K,
+                           maps:put(PartID, lists:sublist(NodeList, Start, K), Partitions) end, 
+    lists:foldl(GenPartition, maps:new(), lists:seq(1, N, K)).
+
+
+gen_tokens(none, _) -> [];
+gen_tokens(NumOfPartitions, TokensPerPartition) ->
+    %% Given the number of partitions 
+    %% Return the list of tokens in the format {<hash>, partition_id}
+    %% For each Partition `TokensPerPartitions` tokens are generated.
+    %%
+    ListOfListOfTokens = [gen_tokens_partition(ID, TokensPerPartition) || 
+                          ID <- lists:seq(0, NumOfPartitions-1)],
+    lists:append(ListOfListOfTokens).
+
+
+gen_tokens_partition(ID, TokensPerPartition) ->
+    IDStr = integer_to_list(ID),
+    TokenNums = lists:map(fun integer_to_list/1, lists:seq(1, TokensPerPartition)),
     %% Concatenate the node name with a number to perturbate the hash
-    [{hash(NodeStr++TokenNum), Node} || TokenNum <- TokenNums].
+    [{hash(IDStr++TokenNum), ID} || TokenNum <- TokenNums].
 
 
 get_key_owner(Key, Tokens) ->
@@ -72,6 +92,8 @@ get_key_owner(Key, Tokens) ->
     FakeToken = {hash(Key), none},
     get_next(FakeToken, Tokens).
 
+
+%% TODO change name from Node to Partition
 
 %% Implement the tokens as a unordered list
 %% O(1) insertion of new a token 
@@ -148,13 +170,14 @@ dump(Data) ->
     io:format("~p~n", [Data]).
 
 test_common() ->
-    TokensPerNode = 2,
-    IPPortListStr = "10.0.0.20:8080,10.0.0.21:8080,10.0.0.22:8080",
-    Nodes = gen_nodes(IPPortListStr),
-    dump(Nodes),
-    Tokens = gen_tokens(IPPortListStr, TokensPerNode),
+    TokensPerPartition = 3,
+    K = 4,
+    IPPortListStr = "10.0.0.20:8080,10.0.0.21:8080,10.0.0.22:8080," ++
+                    "10.0.0.23:8080,10.0.0.24:8080,10.0.0.25:8080",
+    Partitions = gen_partitions(IPPortListStr, K),
+    dump(Partitions),
+    Tokens = gen_tokens(maps:size(Partitions), TokensPerPartition),
     dump(lists:sort(Tokens)),
-    dump(Tokens),
     Tokens.
 
 test_keyowner() ->

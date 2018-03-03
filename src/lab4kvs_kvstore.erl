@@ -9,9 +9,11 @@
 -export([get/1]).
 -export([put/2]).
 -export([put/3]).
+-export([put_list/1]).
 -export([delete/1]).
--export([get_all/0]).
--export([get_keyrange/2]).
+-export([delete_list/1]).
+-export([get_all_entries/0]).
+-export([get_keyrange_entries/2]).
 -export([get_numkeys/0]).
 
 -export([dump/0]).
@@ -31,14 +33,20 @@ put(Key, Value) ->
 put(Key, Value, Hash) ->
     gen_server:call(?MODULE, {put, Key, Value, Hash}).
 
+put_list(KeyValueHashList) when is_list(KeyValueHashList) ->
+    gen_server:call(?MODULE, {put_list, KeyValueHashList}).
+
 delete(Key) ->
     gen_server:call(?MODULE, {delete, Key}).
 
-get_all() ->
+delete_list(Keys) ->
+    gen_server:call(?MODULE, {delete_list, Keys}).
+
+get_all_entries() ->
     %% Return a list of {Key, {Value, Hash}}
     gen_server:call(?MODULE, all).
 
-get_keyrange(Start, End) ->
+get_keyrange_entries(Start, End) ->
     %% Return a list of {Key, {Value, Hash}} such that Start <= Hash <= End
     gen_server:call(?MODULE, {keyrange, Start, End}).
 
@@ -75,6 +83,16 @@ handle_call({put, Key, Value, Hash}, _From, KVS) when is_map(KVS) ->
 handle_call({delete, Key}, _From, KVS) when is_map(KVS) ->
     Reply = {deleted, maps:is_key(Key, KVS)},
     {reply, Reply, maps:remove(Key, KVS)};
+
+handle_call({put_list, KVSEntries}, _From, KVS) when is_map(KVS) ->
+    Put    = fun (Key, Map) -> maps:put(Key, Map) end,
+    NewKVS = lists:foldl(Put, KVS, KVSEntries),
+    {reply, ok, NewKVS};
+
+handle_call({delete_list, KeysToDelete}, _From, KVS) when is_map(KVS) ->
+    Remove = fun (Key, Map) -> maps:remove(Key, Map) end,
+    NewKVS = lists:foldl(Remove, KVS, KeysToDelete),
+    {reply, ok, NewKVS};
 
 handle_call(all, _From, KVS) when is_map(KVS) ->
     KVSList = maps:to_list(KVS),
