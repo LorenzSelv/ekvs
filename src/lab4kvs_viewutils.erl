@@ -9,13 +9,14 @@
 -export([gen_partitions/2]).
 -export([gen_tokens/2]).
 -export([gen_tokens_partition/2]).
--export([get_key_owner/2]).
+-export([update_partitions/4]).
+-export([get_key_owner_token/2]).
 -export([get_prev/2]).
 -export([get_next/2]).
 -export([insert_token/2]).
 -export([delete_token/2]).
 
-%% unitest functions
+%% unittest functions
 -export([test_common/0]).
 -export([test_keyowner/0]).
 -export([test_prev/0]).
@@ -39,10 +40,10 @@ get_node_name(IPPort) ->
 
 get_partition_id(_Node, []) -> -1;
 
-get_partition_id(Node, [{ID, Nodes}|Parts]) -> 
+get_partition_id(Node, [{ID, Nodes}|Partitions]) -> 
     case lists:member(Node, Nodes) of 
-        true -> ID; 
-        false -> get_partition_id(Node, Parts)
+        true  -> ID; 
+        false -> get_partition_id(Node, Partitions)
     end;
 
 get_partition_id(Node, Partitions) ->
@@ -85,7 +86,53 @@ gen_tokens_partition(ID, TokensPerPartition) ->
     [{hash(IDStr++TokenNum), ID} || TokenNum <- TokenNums].
 
 
-get_key_owner(Key, Tokens) ->
+update_partitions(Partitions, add, NewNode, ReplicasPerPartition) ->
+    %% return {Scenario, NewPartitions} where scenario is:
+    %%   - {add, AffectedPartitionID} --> 
+    %%          at least one partition has less than K replicas
+    %%   - {add_partition, NewPartitionID} --> 
+    %%          all partitions have K replicas, create a new one
+    %%
+    NonFullPartition = fun(_K, V) -> length(V) < ReplicasPerPartition end, 
+    NonFullPartitions = maps:filter(NonFullPartition, Partitions), 
+    case maps:size(NonFullPartitions) of
+        0 ->  %% All partitions are full, create a new one
+            PartitionID = maps:size(Partitions),
+            Scenario = {add_partition, PartitionID},
+            NewPartitions = maps:put(PartitionID, [NewNode], Partitions),
+            {Scenario, NewPartitions};
+        _ ->  %% At least one partition has less than K replicas
+              %% Add the node to the first non-full one
+            PartitionID = hd(maps:keys(NonFullPartitions)),
+            Nodes = maps:get(PartitionID, Partitions),
+            Scenario = {add, PartitionID},
+            NewPartitions = maps:put(PartitionID, Nodes ++ [NewNode], Partitions),
+            {Scenario, NewPartitions}
+    end;
+
+update_partitions(Partitions, remove, RemovedNode, _ReplicasPerPartition) ->
+    %% return {Scenario, NewPartitions}
+    %% Scenario can be equal to:
+    %%   - {remove, AffectedPartitionID} --> 
+    %%          the partition the node belongs to has more than 1 node
+    %%   - {remove_partition, RemovedPartitionID} --> 
+    %%          the removed node is the last of the partition, delete the partition 
+    %%
+    PartitionID = get_partition_id(RemovedNode, Partitions),
+    Nodes = maps:get(PartitionID, Partitions),
+    case length(Nodes) of
+        1 ->  %% The node is the only one in the partition, remove the partition 
+            Scenario = {remove_partition, PartitionID},
+            NewPartitions = maps:remove(PartitionID, Partitions),
+            {Scenario, NewPartitions};
+        _ ->  %% The node is not the only one in the partition, remove the node
+            Scenario = {remove, PartitionID},
+            NewPartitions = maps:put(PartitionID, Nodes -- [RemovedNode], Partitions),
+            {Scenario, NewPartitions}
+    end.
+
+
+get_key_owner_token(Key, Tokens) ->
     %% Given a Key and the Tokens list, return the owner 
     %% (next token in the ring)
     %%
@@ -185,7 +232,7 @@ test_keyowner() ->
     Keys = ["One", "Two", "Three", "Four", "Five", "Six"],
     KeyHashes = [hash(Key) || Key <- Keys],
     [dump({H, K}) || {H, K} <- lists:zip(KeyHashes, Keys)],
-    KeyOwners = [get_key_owner(Key, Tokens) || Key <- Keys],
+    KeyOwners = [get_key_owner_token(Key, Tokens) || Key <- Keys],
     [dump({H, O}) || {H, O} <- lists:zip(KeyHashes, KeyOwners)].
 
 test_prev() ->

@@ -6,7 +6,11 @@
 
 %% API interface
 -export([start_link/3]).
--export([get_key_owner/1]).
+-export([get_partition_id/0]).
+-export([get_partition_ids/0]).
+-export([get_partition_members/1]).
+-export([get_key_owners/1]).
+-export([get_key_partition_id/1]).
 -export([view_change/2]).
 
 -export([dump/0]).
@@ -44,9 +48,26 @@ start_link(IPPortList, TokensPerPartition, ReplicasPerPartition) ->
     gen_server:start_link(?MODULE, [IPPortList, TokensPerPartition, ReplicasPerPartition], []).
 
 
-get_key_owner(Key) ->
+get_partition_id() ->
+    gen_server:call(whereis(view_manager), partition_id).
+
+
+get_partition_ids() ->
+    gen_server:call(whereis(view_manager), partition_ids).
+
+
+get_partition_members(PartitionID) ->
+    gen_server:call(whereis(view_manager), {partition_members, PartitionID}).
+
+
+get_key_owners(Key) ->
+    %% Return the nodes of the partition that owns the key
+    gen_server:call(whereis(view_manager), {keyowners, Key}).
+
+
+get_key_partition_id(Key) ->
     %% Return the partition_id of the partition that owns the key
-    gen_server:call(whereis(view_manager), {keyowner, Key}).
+    gen_server:call(whereis(view_manager), {keyowner_partition, Key}).
 
 
 view_change(Type, IPPort) when Type =:= <<"add">> orelse Type =:= <<"remove">> ->
@@ -74,12 +95,32 @@ init([IPPortList, TokensPerPartition, ReplicasPerPartition]) ->
                replicas_per_partition=ReplicasPerPartition}}.
 
 
-handle_call({keyowner, Key}, _From, View = #view{tokens=Tokens}) ->
-    {_Hash, KeyOwner} = lab4kvs_viewutils:get_key_owner(Key, Tokens), 
-    {reply, KeyOwner, View};
+handle_call(partition_id, _From, View = #view{partition_id=PartitionID}) ->
+    {reply, PartitionID, View};
 
 
-handle_call({view_change, Type, NodeChanged}, _From, View = #view{partitions=Partitions}) ->
+handle_call(partition_ids, _From, View = #view{partitions=Partitions}) ->
+    {reply, maps:keys(Partitions), View};
+
+
+handle_call({partition_members, ID}, _From, View = #view{partitions=Partitions}) ->
+    {reply, maps:get(ID, Partitions), View};
+
+
+handle_call({keyowners, Key}, _From, View = #view{partitions=Partitions,
+                                                  tokens=Tokens}) ->
+    {_Hash, PartitionID} = lab4kvs_viewutils:get_key_owner_token(Key, Tokens), 
+    KeyOwners = maps:get(PartitionID, Partitions),
+    {reply, KeyOwners, View};
+
+
+handle_call({keyowner_partition, Key}, _From, View = #view{tokens=Tokens}) ->
+    {_Hash, PartitionID} = lab4kvs_viewutils:get_key_owner_token(Key, Tokens), 
+    {reply, PartitionID, View};
+
+
+handle_call({view_change, Type, NodeChanged}, _From, View = #view{partitions=Partitions,
+                                                                  replicas_per_partition=ReplicasPerPartition}) ->
     %% lab4kvs_debug:call({view_change, Type}),
     Ref = make_ref(),
     %% Update the partitions: 
@@ -88,7 +129,7 @@ handle_call({view_change, Type, NodeChanged}, _From, View = #view{partitions=Par
     NodesToBroadcast = case Type of add -> get_all_nodes(Partitions) ++ [NodeChanged];
                                     remove -> get_all_nodes(Partitions) end,
     broadcast_view_change(Type, NodeChanged, Ref, NodesToBroadcast, View), %% TODO pass UpdatedView ?
-    {Scenario, NewPartitions} = lab4kvs_viewutils:update_partitions(Partitions, Type, NodeChanged),
+    {Scenario, NewPartitions} = lab4kvs_viewutils:update_partitions(Partitions, Type, NodeChanged, ReplicasPerPartition),
     %% Scenario = {add|add_partition|remove|remove_partition, partition_id} 
     NewView = apply_view_change(Scenario, NodeChanged, View#view{partitions=NewPartitions}),
     wait_ack_view_change(Ref, NodesToBroadcast),
@@ -107,8 +148,8 @@ handle_call(dump, _From, View = #view{partition_id=PartitionID,
                 "tokens       ~p~n" ++ 
                 "tok_x_part   ~p~n" ++
                 "rep_x_part   ~p~n",
-    Terms = io_lib:format(FormatStr, [PartitionID,
-                                      node(), 
+    Terms = io_lib:format(FormatStr, [node(),
+                                      PartitionID, 
                                       lists:sort(maps:to_list(Partitions)), 
                                       lists:sort(Tokens), 
                                       TokensPerPartition,
@@ -139,17 +180,20 @@ wait_ack_view_change(Ref, BroadcastedNodes) ->
     [WaitACK(Node, Ref) || Node <- BroadcastedNodes, Node =/= node()].
 
 
-handle_info({view_change, Type, Node, {NodeToACK, Ref}, BroadcastedView}, _View) ->
+handle_info({view_change, Type, NodeChanged, {NodeToACK, Ref}, BroadcastedView}, _View) ->
     %% The message sent in broadcast_view_change will trigger this callback.
     %% Execute the view change and send an ack back.
     %%
-    io:format("Received broadcast view_change ~p ~p from ~p~n", [Type, Node, NodeToACK]),
+    io:format("Received broadcast view_change ~p ~p from ~p~n", [Type, NodeChanged, NodeToACK]),
     %% New partitions added to the system don't have the View set, use the one received
     %% as part of the broadcast message (BroadcastedView)
-    %% TODO copy from view_change callback
-    NewView = apply_view_change(Type, Node, BroadcastedView),
+    Partitions = BroadcastedView#view.partitions,
+    ReplicasPerPartition = BroadcastedView#view.replicas_per_partition,
+    {Scenario, NewPartitions} = lab4kvs_viewutils:update_partitions(Partitions, Type, NodeChanged, ReplicasPerPartition),
+    %% Scenario = {add|add_partition|remove|remove_partition, partition_id} 
+    NewView = apply_view_change(Scenario, NodeChanged, BroadcastedView#view{partitions=NewPartitions}),
     {view_manager, NodeToACK} ! {node(), Ref},
-    io:format("ACKed broadcast view_change ~p ~p from ~p~n", [Type, Node, NodeToACK]),
+    io:format("ACKed broadcast view_change ~p ~p from ~p~n", [Type, NodeChanged, NodeToACK]),
     {noreply, NewView};
 
 
@@ -186,6 +230,7 @@ apply_view_change({add, AffectedPartitionID}, NodeToInsert, View = #view{partiti
 
 
 apply_view_change({add_partition, NewPartitionID}, NodeToInsert, View = #view{partition_id=PartitionID,
+                                                                              partitions=Partitions,
                                                                               tokens=Tokens,
                                                                               tokens_per_partition=TokensPerPartition}) ->
     %% The node has been added to a new partition (yet to be tokenized)
@@ -198,8 +243,8 @@ apply_view_change({add_partition, NewPartitionID}, NodeToInsert, View = #view{pa
     %% Note: Partitions map has already been updated with the new partition
     %%
     %% TODO change name to gen_partition_tokens
-    TokensToInsert = lab3kvs_viewutils:gen_tokens_partition(NewPartitionID, TokensPerPartition),
-    Fun = fun(Token, AccTokens) -> move_keys(Token, AccTokens, PartitionID, NodeToInsert) end,
+    TokensToInsert = lab4kvs_viewutils:gen_tokens_partition(NewPartitionID, TokensPerPartition),
+    Fun = fun(Token, AccTokens) -> move_keys(Token, AccTokens, NodeToInsert, PartitionID, Partitions) end,
     UpdatedTokens = lists:foldl(Fun, Tokens, TokensToInsert),
     View#view{tokens=UpdatedTokens};
 
@@ -222,8 +267,8 @@ apply_view_change({remove_partition, OldPartitionID}, NodeToRemove, View = #view
     case NodeToRemove =:= node() of
         true -> %% I'm being deleted, move all my keys to other partitions
             KVSEntries = lab4kvs_kvstore:get_all_entries(),
-            GetKeyOwner = fun({Key, _}) -> {_H, KOwn} = lab4kvs_viewutils:get_key_owner(Key, UpdatedTokens), 
-                                        KOwn end,
+            GetKeyOwner = fun({Key, _}) -> {_H, KOwn} = lab4kvs_viewutils:get_key_owner_token(Key, UpdatedTokens), 
+                                           KOwn end,
             %% TODO optimize merging distinct RPC calls to the same destination node
             %%      build a map [DestNode => [Entries..]] and call move_entries for each pair
             io:format("Moving entries..~n"),
@@ -236,14 +281,14 @@ apply_view_change({remove_partition, OldPartitionID}, NodeToRemove, View = #view
     View#view{tokens=UpdatedTokens}.
 
 
-move_keys(TokenToInsert = {Hash, DestPartition}, Tokens, PartitionID, DestNode) ->
+move_keys(TokenToInsert = {Hash, DestPartition}, Tokens, DestNode, PartitionID, Partitions) ->
     %% Given a new token and the list of current tokens, move some of the keys
     %% to the new node (DestNode) in the new partition (DestPartition).
     %%
     lab4kvs_debug:call(move_keys_add),
     {PrevHash, _PrevPartition} = lab4kvs_viewutils:get_prev(TokenToInsert, Tokens),
     {_NextHash, NextPartition} = lab4kvs_viewutils:get_next(TokenToInsert, Tokens),
-    SelectedNode = select_node(PartitionID),
+    SelectedNode = select_node(maps:get(PartitionID, Partitions)),
     case NextPartition =:= PartitionID andalso DestPartition =/= PartitionID andalso 
          SelectedNode  =:= node() of
         true  -> %% The keys to be moved to the new partition belong to my partition
@@ -268,6 +313,7 @@ move_keyrange({Start, End}, DestNode) ->
     lab4kvs_debug:return(move_keyrange, nostate).
 
 
+move_entries([], _DestNode) -> ok;
 move_entries(KVSEntries, DestNode) when is_list(KVSEntries) ->
     %% RPC to destnode to insert the list of entries
     %% local call to delete the local copy of the entries
@@ -292,14 +338,14 @@ get_all_nodes(Partitions) ->
     lists:append(maps:values(Partitions)).
 
 
-select_node_ignoring(Partition, NodeToIgnore) when is_list(Partition) ->
-    select_node(Partition -- [NodeToIgnore]).
+select_node_ignoring(PartitionNodes, NodeToIgnore) when is_list(PartitionNodes) ->
+    select_node(PartitionNodes -- [NodeToIgnore]).
 
 
-select_node(Partition) when is_list(Partition) ->
+select_node(PartitionNodes) when is_list(PartitionNodes) ->
     %% Return the node in the partition with the smaller IP address
     %% TODO handle case of nodes unavailable in the partition
-    lists:min(Partition).
+    lists:min(PartitionNodes).
 
 
 handle_cast(Msg, State) ->

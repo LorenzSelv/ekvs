@@ -14,6 +14,7 @@
              lab4kvs_handler,
              lab4kvs_keynumhandler,
              lab4kvs_viewhandler,
+             lab4kvs_partitionsinfohandler,
              lab4kvs_debug,
              lab4kvs_kvstore,
              lab4kvs_viewmanager,
