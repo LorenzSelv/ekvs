@@ -1,5 +1,5 @@
-%% lab4kvs_handler
-%% Handler module kvs rest api
+%% lab4kvs_viewutils
+%% Implements util functions for the view manager 
 
 -module(lab4kvs_viewutils).
 
