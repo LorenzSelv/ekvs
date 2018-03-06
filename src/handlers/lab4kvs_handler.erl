@@ -12,9 +12,24 @@
 -define(HEADER, #{<<"content-type">> => <<"application/json">>}).
 
 %% Response Bodies
--define(BODY_GET(Value, Owner), jsx:encode(#{<<"msg">> => <<"success">>, <<"value">> => Value, <<"owner">> => Owner})).
+-define(BODY_GET(Value, Owner), 
+    jsx:encode(#{
+        <<"msg">> => <<"success">>, 
+        <<"value">> => Value, 
+        <<"parition_id">> => PartitionID, 
+        <<"causal_payload">> => Payload, 
+        <<"timestamp">> => Timestamp,
+        <<"owner">> => Owner} % REMOVE owner 
+    )).
 
--define(BODY_PUT(Replaced, Owner), jsx:encode(#{<<"replaced">> => Replaced, <<"msg">> => <<"success">>, <<"owner">> => Owner})).
+-define(BODY_PUT(Replaced, Owner), 
+    jsx:encode(#{
+        <<"replaced">> => Replaced, %REMOVE replaced
+        <<"msg">> => <<"success">>,
+        <<"causal_payload">> => Payload, 
+        <<"timestamp">> => Timestamp,
+        <<"owner">> => Owner}
+    )).
 
 -define(BODY_DELETE, jsx:encode(#{<<"msg">> => <<"success">>})).
 
@@ -30,8 +45,8 @@
 
 init(Req0=#{ method := <<"GET">> }, State) ->
     Req = try parse_body(get, Req0) of
-            {true, Key} -> %% Legal key
-                case kvs_query(get, [Key]) of
+            {true, Key, Payload} -> %% Legal key
+                case kvs_query(get, [Key, Payload]) of
                     {{ok, Value}, Owner} ->
                         cowboy_req:reply(200, ?HEADER, ?BODY_GET(Value, Owner), Req0);
                     {error, _Owner} ->
@@ -117,6 +132,7 @@ kvs_query(Func, Args) ->
             [K,_] -> K;
             [K]   -> K
           end,
+    %update view manager to take the causal payload
     Node = lab4kvs_viewmanager:get_key_owner(Key),
     io:format("Node ~p~n", [Node]),
     Owner = get_ip_port(Node),
@@ -144,18 +160,27 @@ node_down_reply(Reason, Req) ->
     io:format("TIMEOUT ~p~n", [Reason]),
     cowboy_req:reply(404, ?HEADER, ?BODY_NODEDOWN, Req).
 
-parse_body(Method, Req) when Method == get orelse Method == delete ->
+% deleting a key is bonus. Removing 'orelse Method == delete'
+% from guard
+parse_body(Method, Req) when Method == get  ->
     %% Extract query string values from the request body
     Data = cowboy_req:parse_qs(Req),
     {_, Key} = lists:keyfind(<<"key">>, 1, Data),
-    {legal_key(Key), Key};
+    {_, Payload} = lists:keyfind(<<"causal_payload">>,1, Data),
+    {legal_key(Key), Key, Payload};
 
 parse_body(put, Req) ->
     {ok, Data, _} = cowboy_req:read_urlencoded_body(Req),
     io:format("DATA=~p~n~n",[Data]),
     {_, Key}   = lists:keyfind(<<"key">>,   1, Data),
     {_, Value} = lists:keyfind(<<"value">>, 1, Data),
-    {legal_key(Key), Key, Value}.
+    
+    % not sure if keyfind will return {_,Val} if empty string
+    Payload = case lists:keyfind(<<"causal_payload">>, 1, Data) of
+        {_, Payload} -> Payload; 
+        false -> <<"">>,
+    end,
+    {legal_key(Key), Key, Value, Payload}.
 
 legal_key(Key) -> 
     %% Return true if the key is legal, false otherwise
