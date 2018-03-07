@@ -11,7 +11,7 @@ test_CP_VC() ->
     io:format("~p~n", [VC]),
     CP = lab4kvs_kvsutils:vector_clock_to_causal_payload(VC).
 
-test_happens_before(1) ->
+happens_before_test(1) ->
     %% a -> b
     VCa = #{n0 => 0, n1 => 2, n2 => 3},
     VCb = #{n0 => 1, n1 => 3, n2 => 4},
@@ -19,7 +19,7 @@ test_happens_before(1) ->
     false = lab4kvs_kvsutils:happens_before(VCb, VCa),
     ok;
 
-test_happens_before(2) ->
+happens_before_test(2) ->
     %% a -> b
     VCa = #{n0 => 1, n1 => 3, n2 => 3},
     VCb = #{n0 => 1, n1 => 3, n2 => 4},
@@ -27,7 +27,7 @@ test_happens_before(2) ->
     false = lab4kvs_kvsutils:happens_before(VCb, VCa),
     ok;
 
-test_happens_before(3) ->
+happens_before_test(3) ->
     %% b -> a
     VCa = #{n0 => 1, n1 => 3, n2 => 4},
     VCb = #{n0 => 0, n1 => 3, n2 => 4},
@@ -35,7 +35,7 @@ test_happens_before(3) ->
     true  = lab4kvs_kvsutils:happens_before(VCb, VCa),
     ok;
 
-test_happens_before(4) ->
+happens_before_test(4) ->
     %% concurrent
     VCa = #{n0 => 1, n1 => 3, n2 => 4},
     VCb = #{n0 => 1, n1 => 3, n2 => 4},
@@ -43,7 +43,7 @@ test_happens_before(4) ->
     false = lab4kvs_kvsutils:happens_before(VCb, VCa),
     ok;
 
-test_happens_before(5) ->
+happens_before_test(5) ->
     %% concurrent
     VCa = #{n0 => 1, n1 => 4, n2 => 4},
     VCb = #{n0 => 2, n1 => 3, n2 => 4},
@@ -52,5 +52,5 @@ test_happens_before(5) ->
     ok.
 
 happens_before_test() ->
-    [test_happens_before(N) || N <- lists:seq(1,5)].
+    [happens_before_test(N) || N <- lists:seq(1,5)].
 
