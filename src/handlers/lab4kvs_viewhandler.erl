@@ -9,7 +9,10 @@
 -define(HEADER, #{<<"content-type">> => <<"application/json">>}).
 
 %% Response Bodies
--define(BODY_PUT, jsx:encode(#{<<"msg">> => <<"success">>})).
+-define(BODY_PUT, jsx:encode(#{
+    <<"msg">> => <<"success">>,
+    <<"partition_id">> => PartitionID,
+    <<"number_of_partitions">> => PartitionCount})).
 
 -define(BODY_ILLEGALREQ, jsx:encode(#{<<"msg">> => <<"error">>, <<"error">> => <<"illegal request">>})).
 
@@ -17,8 +20,8 @@
 init(Req0=#{ method := <<"PUT">> }, State) ->
     
     Req = try parse_body(Req0) of
-            {true, Type, IPPort} -> %% Legal type
-                lab4kvs_viewmanager:view_change(Type, IPPort),
+            {true, Type, IPPort} -> %% Legal type 
+                lab4kvs_viewmanager:view_change(Type, IPPort), %%VIEWMANAGER needs to return PartitionID and PartitionCount
                 cowboy_req:reply(200, ?HEADER, ?BODY_PUT, Req0);
             {false, _, _} -> %% Illegal type
                 cowboy_req:reply(404, ?HEADER, ?BODY_ILLEGALREQ, Req0)
