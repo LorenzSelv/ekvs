@@ -117,8 +117,8 @@ gen_tokens_partition(ID, TokensPerPartition) ->
 %%  {remove_partition, n3, p2}, %% remove n3 and p2
 %%  {add, n3, p1}]              %% add    n3 to p1
 %%
-%% TODO handle the case of more than one node for the partitions to merge
 %%
+
 get_transformation_ops(add, NewNode, Partitions, K) ->
     NonFullPartition = fun(_K, V) -> length(V) < K end, 
     NonFullPartitions = maps:filter(NonFullPartition, Partitions), 
@@ -151,7 +151,7 @@ get_transformation_ops(remove, NodeToRemove, Partitions, K) ->
                     NodesToMove = maps:get(FromID, Partitions),
                     AddOps    = [{add,    Node, ToID}   || Node <- NodesToMove],
                     RemoveOps = [{remove, Node, FromID} || Node <- tl(NodesToMove)],
-                    LastOp = {remove_partition, hd(NodeToRemove), FromID}, 
+                    LastOp = {remove_partition, hd(NodesToMove), FromID}, 
                     [FirstOp] ++ AddOps ++ RemoveOps ++ [LastOp];
                 false ->
                     [FirstOp]
@@ -202,9 +202,11 @@ find_match(ID, Target, AccMatches, NonFullSizes, K) ->
             OtherID = hd(maps:keys(PossibleMatches)),
             OtherSize = Target,
             MySize = K - Target,
-            NewMatch = case OtherSize > MySize of
-                           true  -> {ID, OtherID};
-                           false -> {OtherID, ID}
+            NewMatch = if 
+                           OtherSize > MySize -> {ID, OtherID};
+                           OtherSize < MySize -> {OtherID, ID};
+                           OtherSize =:= MySize -> 
+                               {max(ID, OtherID), min(ID, OtherID)} 
                         end,
             AccMatches ++ [NewMatch]
     end.

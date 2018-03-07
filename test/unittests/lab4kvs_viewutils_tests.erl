@@ -43,6 +43,7 @@ test_wraparound() ->
     [{10, node1}, {20, node2}, {30, node3}, {10, node1}] = Nexts, 
     [dump({P,H,N}) || {P,H,N} <- lists:zip3(Prevs, Hashes, Nexts)].
 
+%%% can_merge_partitions %%%
 
 both_directions(From, To, A, B) ->
     case {From, To} =:= {A, B} orelse 
@@ -109,5 +110,56 @@ can_merge_partition_test() ->
     [can_merge_partition_test(N) || N <- lists:seq(1, 9)].
 
 
+%%% get_transformation_ops %%%
+
+get_transformation_ops_test(1) ->
+    K = 2,
+    Partitions = #{0 => [n0, n1], 1 => [n2]},
+    Ops = lab4kvs_viewutils:get_transformation_ops(add, n3, Partitions, K),
+    ?assertMatch([{add, n3, 1}], Ops);
+
+get_transformation_ops_test(2) ->
+    K = 2,
+    Partitions = #{0 => [n0, n1], 1 => [n2, n3]},
+    Ops = lab4kvs_viewutils:get_transformation_ops(add, n4, Partitions, K),
+    ?assertMatch([{add_partition, n4, 2}], Ops);
+
+get_transformation_ops_test(3) ->
+    K = 3,
+    Partitions = #{0 => [n0, n1, n2], 1 => [n3]},
+    Ops = lab4kvs_viewutils:get_transformation_ops(add, n4, Partitions, K),
+    ?assertMatch([{add, n4, 1}], Ops);
+
+get_transformation_ops_test(4) ->
+    K = 3,
+    Partitions = #{0 => [n0, n1, n2], 1 => [n3]},
+    Ops = lab4kvs_viewutils:get_transformation_ops(remove, n3, Partitions, K),
+    ?assertMatch([{remove_partition, n3, 1}], Ops);
+
+get_transformation_ops_test(5) ->
+    K = 3,
+    Partitions = #{0 => [n0, n1, n2], 1 => [n3, n4]},
+    Ops = lab4kvs_viewutils:get_transformation_ops(remove, n3, Partitions, K),
+    ?assertMatch([{remove, n3, 1}], Ops);
+
+get_transformation_ops_test(6) ->
+    K = 2,
+    Partitions = #{0 => [n0, n1], 1 => [n2]},
+    Ops = lab4kvs_viewutils:get_transformation_ops(remove, n1, Partitions, K),
+    ?assertMatch([{remove, n1, 0},
+                  {add,    n2, 0},
+                  {remove_partition, n2, 1}], Ops);
+
+get_transformation_ops_test(7) ->
+    K = 3,
+    Partitions = #{0 => [n0, n1, n2], 1 => [n3]},
+    Ops = lab4kvs_viewutils:get_transformation_ops(remove, n1, Partitions, K),
+    ?assertMatch([{remove, n1, 0},
+                  {add,    n3, 0},
+                  {remove_partition, n3, 1}], Ops).
+
+
 get_transformation_ops_test() ->
-    pass.
+    [get_transformation_ops_test(N) || N <- lists:seq(1, 7)].
+
+
