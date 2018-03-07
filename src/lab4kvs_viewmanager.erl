@@ -119,20 +119,21 @@ handle_call({keyowner_partition, Key}, _From, View = #view{tokens=Tokens}) ->
     {reply, PartitionID, View};
 
 
-handle_call({view_change, Type, NodeChanged}, _From, View = #view{partitions=Partitions,
-                                                                  replicas_per_partition=ReplicasPerPartition}) ->
-    %% lab4kvs_debug:call({view_change, Type}),
-    Ref = make_ref(),
+handle_call({view_change, Type, NodeChanged}, _From, View = #view{partitions=Partitions}) ->
     %% Update the partitions: 
     %%   - a new partition is created iff all partitions have already K nodes
     %%   - a partition is deleted iff the node being deleted is the last one of the partition 
+    %%     or two partitions can be merged
+    %%
+    %% lab4kvs_debug:call({view_change, Type}),
+    Ref = make_ref(),
     NodesToBroadcast = case Type of add -> get_all_nodes(Partitions) ++ [NodeChanged];
-                                    remove -> get_all_nodes(Partitions) end,
-    broadcast_view_change(Type, NodeChanged, Ref, NodesToBroadcast, View), %% TODO pass UpdatedView ?
-    {Scenario, NewPartitions} = lab4kvs_viewutils:update_partitions(Partitions, Type, NodeChanged, ReplicasPerPartition),
-    %% Scenario = {add|add_partition|remove|remove_partition, partition_id} 
-    NewView = apply_view_change(Scenario, NodeChanged, View#view{partitions=NewPartitions}),
+                                 remove -> get_all_nodes(Partitions) end,
+
+    broadcast_view_change(Type, NodeChanged, Ref, NodesToBroadcast, View),
+    NewView = apply_view_change(Type, NodeChanged, View),
     wait_ack_view_change(Ref, NodesToBroadcast),
+
     %% lab4kvs_debug:return({view_change, Type}, NewView),
     {reply, view_changed, NewView};
 
@@ -158,40 +159,15 @@ handle_call(dump, _From, View = #view{partition_id=PartitionID,
     {reply, Reply, View}.
 
 
-broadcast_view_change(Type, NodeChanged, Ref, NodesToBroadcast, View) ->
-    %% Broadcast the view change to every other node in the view.
-    %% A unique identifier Ref will be used for ACK the node who issued the broadcast.
-    %% This message will be handled by the handle_info callback
-    %%
-    SendMsg = fun(Node) -> {view_manager, Node} ! 
-                           {view_change, Type, NodeChanged, {node(), Ref}, View} end,
-    [SendMsg(Node) || Node <- NodesToBroadcast, Node =/= node()].
-
-
-wait_ack_view_change(Ref, BroadcastedNodes) -> 
-    %% Wait for an ACK from every other node in the view
-    %%
-    io:format("Waiting for ACK from ~p~n", [BroadcastedNodes]),
-    WaitACK = fun(_Node, R) -> 
-                  receive 
-                      {Sender, R} -> io:format("Received ACK from ~p~n", [Sender]),
-                                   ok 
-                  end end,
-    [WaitACK(Node, Ref) || Node <- BroadcastedNodes, Node =/= node()].
-
-
 handle_info({view_change, Type, NodeChanged, {NodeToACK, Ref}, BroadcastedView}, _View) ->
     %% The message sent in broadcast_view_change will trigger this callback.
     %% Execute the view change and send an ack back.
-    %%
-    io:format("Received broadcast view_change ~p ~p from ~p~n", [Type, NodeChanged, NodeToACK]),
     %% New partitions added to the system don't have the View set, use the one received
     %% as part of the broadcast message (BroadcastedView)
-    Partitions = BroadcastedView#view.partitions,
-    ReplicasPerPartition = BroadcastedView#view.replicas_per_partition,
-    {Scenario, NewPartitions} = lab4kvs_viewutils:update_partitions(Partitions, Type, NodeChanged, ReplicasPerPartition),
-    %% Scenario = {add|add_partition|remove|remove_partition, partition_id} 
-    NewView = apply_view_change(Scenario, NodeChanged, BroadcastedView#view{partitions=NewPartitions}),
+    %%
+    io:format("Received broadcast view_change ~p ~p from ~p~n", [Type, NodeChanged, NodeToACK]),
+    NewView = apply_view_change(Type, NodeChanged, BroadcastedView),
+    %% Send the ACK back to the node who broadcasted the view_change
     {view_manager, NodeToACK} ! {node(), Ref},
     io:format("ACKed broadcast view_change ~p ~p from ~p~n", [Type, NodeChanged, NodeToACK]),
     {noreply, NewView};
@@ -208,16 +184,50 @@ handle_info(Msg, View) ->
     {noreply, View}.
 
 
-apply_view_change({add, AffectedPartitionID}, NodeToInsert, View = #view{partition_id=PartitionID,
-                                                                         partitions=Partitions}) ->
+broadcast_view_change(Type, NodeChanged, Ref, NodesToBroadcast, View) ->
+    %% Broadcast the view change to every other node in the view.
+    %% A unique identifier Ref will be used for ACK the node who issued the broadcast.
+    %% This message will be handled by the handle_info callback
+    %%
+    SendMsg = fun(Node) -> {view_manager, Node} ! 
+                           {view_change, Type, NodeChanged, {node(), Ref}, View} end,
+    [SendMsg(Node) || Node <- NodesToBroadcast, Node =/= node()].
+
+
+wait_ack_view_change(Ref, BroadcastedNodes) -> 
+    %% Wait for an ACK from every other node in the view
+    %%
+    %% TODO disconnected nodes won't reply, but at least one node
+    %% per partition has to reply
+    io:format("Waiting for ACK from ~p~n", [BroadcastedNodes]),
+    WaitACK = fun(_Node, R) -> 
+                  receive 
+                      {Sender, R} -> io:format("Received ACK from ~p~n", [Sender]),
+                                   ok 
+                  end end,
+    [WaitACK(Node, Ref) || Node <- BroadcastedNodes, Node =/= node()].
+
+
+apply_view_change(Type, NodeChanged, View) ->
+    Partitions = View#view.partitions,
+    ReplicasPerPartition = View#view.replicas_per_partition,
+    Ops = lab4kvs_viewutils:get_transformation_ops(Type, NodeChanged, Partitions, ReplicasPerPartition),
+    %% Apply all operations sequentially, each operation is in the format
+    %% Op = {add|add_partition|remove|remove_partition, node, partition_id} 
+    %% apply_view_change_op takes an Op and the current View and return
+    %% the resulting view, used in the next foldl iteration
+    NewView = lists:foldl(fun apply_view_change_op/2, View, Ops),
+    NewView.
+
+
+apply_view_change_op(_Op={add, NodeToInsert, AffectedPartitionID}, View = #view{partition_id=PartitionID,
+                                                                                partitions=Partitions}) ->
     %% The node has been added to an existing partition
     %% No keys should be moved among partitions
-    %% The key belonging to the affected partition should be replicated in the new node
-    %%
-    %% Note: Partitions map has already been updated with the new node
+    %% The keys belonging to the affected partition should be replicated in the new node
     %%
     AffectedPartition = maps:get(AffectedPartitionID, Partitions),
-    SelectedNode = select_node_ignoring(AffectedPartition, NodeToInsert),
+    SelectedNode = select_node(AffectedPartition),
     case PartitionID =:= AffectedPartitionID andalso node() =:= SelectedNode of
         true -> %% I belong to the affected partition and I have been 
                 %% selected to replicate my keys in the new node
@@ -226,13 +236,14 @@ apply_view_change({add, AffectedPartitionID}, NodeToInsert, View = #view{partiti
         false -> %% Nothing to do
             io:format("Node ~p replicates its key to ~p~n", [SelectedNode, NodeToInsert])
     end,
-    View; 
+    NewPartitions = maps:put(AffectedPartitionID, AffectedPartition ++ [NodeToInsert], Partitions),
+    View#view{partitions=NewPartitions}; 
 
 
-apply_view_change({add_partition, NewPartitionID}, NodeToInsert, View = #view{partition_id=PartitionID,
-                                                                              partitions=Partitions,
-                                                                              tokens=Tokens,
-                                                                              tokens_per_partition=TokensPerPartition}) ->
+apply_view_change_op(_Op={add_partition, NodeToInsert, NewPartitionID}, View = #view{partition_id=PartitionID,
+                                                                                     partitions=Partitions,
+                                                                                     tokens=Tokens,
+                                                                                     tokens_per_partition=TokensPerPartition}) ->
     %% The node has been added to a new partition (yet to be tokenized)
     %% The other partitions should move the keys belonging to the new partition
     %%
@@ -240,25 +251,25 @@ apply_view_change({add_partition, NewPartitionID}, NodeToInsert, View = #view{pa
     %% at each "iteration" using the variable AccTokens. At the end, the
     %% list with all the new tokens inserted is returned.
     %%
-    %% Note: Partitions map has already been updated with the new partition
-    %%
-    %% TODO change name to gen_partition_tokens
     TokensToInsert = lab4kvs_viewutils:gen_tokens_partition(NewPartitionID, TokensPerPartition),
     Fun = fun(Token, AccTokens) -> move_keys(Token, AccTokens, NodeToInsert, PartitionID, Partitions) end,
+    NewPartitions = maps:put(NewPartitionID, [NodeToInsert], Partitions),
     UpdatedTokens = lists:foldl(Fun, Tokens, TokensToInsert),
-    View#view{tokens=UpdatedTokens};
+    View#view{partitions=NewPartitions,tokens=UpdatedTokens};
 
 
-apply_view_change({remove, _AffectedPartitionID}, _NodeToDelete, View) ->
+apply_view_change_op(_Op={remove, NodeToRemove, AffectedPartitionID}, View = #view{partitions=Partitions}) ->
     %% The node has been removed from a partition with more than one node
     %% No keys should be moved among partitions, nothing to replicate
     %%
-    %% Note: Partitions map has already been updated with the new node
-    %%
-    View; 
+    OldNodes = maps:get(AffectedPartitionID, Partitions),
+    NewNodes = OldNodes -- [NodeToRemove],
+    NewPartitions = maps:put(AffectedPartitionID, NewNodes, Partitions),
+    View#view{partitions=NewPartitions}; 
 
 
-apply_view_change({remove_partition, OldPartitionID}, NodeToRemove, View = #view{tokens=Tokens}) ->
+apply_view_change_op(_Op={remove_partition, NodeToRemove, OldPartitionID}, View = #view{partitions=Partitions,
+                                                                                        tokens=Tokens}) ->
     %% The node has been deleted from a partition with a single node 
     %% The partition has to be removed and its keys transferred to the other partitions
     %% Retrieve all partition's tokens and transfer the keys to the other partitions
@@ -277,8 +288,8 @@ apply_view_change({remove_partition, OldPartitionID}, NodeToRemove, View = #view
         false -> %% I'm not the node being deleted, nothing to do
             io:format("I'm not the node being deleted, nothing to do ~p =/= ~p ~n", [NodeToRemove, node()])
     end,
-    %% Note: partitions map has already been updated
-    View#view{tokens=UpdatedTokens}.
+    NewPartitions = maps:remove(OldPartitionID, Partitions),
+    View#view{partitions=NewPartitions, tokens=UpdatedTokens}.
 
 
 move_keys(TokenToInsert = {Hash, DestPartition}, Tokens, DestNode, PartitionID, Partitions) ->
@@ -288,7 +299,8 @@ move_keys(TokenToInsert = {Hash, DestPartition}, Tokens, DestNode, PartitionID, 
     lab4kvs_debug:call(move_keys_add),
     {PrevHash, _PrevPartition} = lab4kvs_viewutils:get_prev(TokenToInsert, Tokens),
     {_NextHash, NextPartition} = lab4kvs_viewutils:get_next(TokenToInsert, Tokens),
-    SelectedNode = select_node(maps:get(PartitionID, Partitions)),
+    SourceNodes = maps:get(PartitionID, Partitions),
+    SelectedNode = select_node(SourceNodes),
     case NextPartition =:= PartitionID andalso DestPartition =/= PartitionID andalso 
          SelectedNode  =:= node() of
         true  -> %% The keys to be moved to the new partition belong to my partition
@@ -338,8 +350,8 @@ get_all_nodes(Partitions) ->
     lists:append(maps:values(Partitions)).
 
 
-select_node_ignoring(PartitionNodes, NodeToIgnore) when is_list(PartitionNodes) ->
-    select_node(PartitionNodes -- [NodeToIgnore]).
+%% select_node_ignoring(PartitionNodes, NodeToIgnore) when is_list(PartitionNodes) ->
+    %% select_node(PartitionNodes -- [NodeToIgnore]).
 
 
 select_node(PartitionNodes) when is_list(PartitionNodes) ->

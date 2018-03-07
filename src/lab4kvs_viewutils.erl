@@ -9,18 +9,16 @@
 -export([gen_partitions/2]).
 -export([gen_tokens/2]).
 -export([gen_tokens_partition/2]).
--export([update_partitions/4]).
+-export([get_transformation_ops/4]).
 -export([get_key_owner_token/2]).
 -export([get_prev/2]).
 -export([get_next/2]).
 -export([insert_token/2]).
 -export([delete_token/2]).
 
-%% unittest functions
--export([test_common/0]).
--export([test_keyowner/0]).
--export([test_prev/0]).
--export([test_wraparound/0]).
+-ifdef(TEST).
+-compile(export_all).
+-endif.
 
 
 -define(HASHALGO, md5).
@@ -86,49 +84,129 @@ gen_tokens_partition(ID, TokensPerPartition) ->
     [{hash(IDStr++TokenNum), ID} || TokenNum <- TokenNums].
 
 
-update_partitions(Partitions, add, NewNode, ReplicasPerPartition) ->
-    %% return {Scenario, NewPartitions} where scenario is:
-    %%   - {add, AffectedPartitionID} --> 
-    %%          at least one partition has less than K replicas
-    %%   - {add_partition, NewPartitionID} --> 
-    %%          all partitions have K replicas, create a new one
-    %%
-    NonFullPartition = fun(_K, V) -> length(V) < ReplicasPerPartition end, 
+%% get_transformation_ops
+%%
+%% Return a list of one or more operations to sequentially
+%% perform to the view in order to apply the view_change
+%% An operation (Op) is in the format {OpType, Node, PartitionID}.
+%%
+%% There are 4 types of Ops:
+%%   - {remove, NodeToRemove, AffectedPartitionID} ->
+%%          remove the node from the partition
+%%   - {remove_partition, NodeToRemove, RemovedPartitionID} --> 
+%%          the removed node is the last of the partition, 
+%%          remove the node and the partition 
+%%   - {add, NewNode, AffectedPartitionID} ->
+%%          add the node to the partition
+%%   - {add_partition, NewNode, NewPartitionID} --> 
+%%          all partitions have already K replicas,
+%%          create a new partition and add the node to it
+%%
+%% The only case when the list is longer than 1 is during a remove
+%% which results in 2 nodes having less than K replicas that can be
+%% merged in a single one. 
+%% For example for K=2 and Partitions
+%% #{p0 => [n0, n1], p1 => [n2, n3], p2 => [n3]}
+%% removing n2 results in
+%% #{p0 => [n0, n1], p1 => [n3], p2 => [n3]}
+%% p1 and p2 should be merged
+%% #{p0 => [n0, n1], p1 => [n3, n3]}
+%%
+%% The returned value is the following list of Ops:
+%% [{remove, n2, p1},           %% remove n2 from p1
+%%  {remove_partition, n3, p2}, %% remove n3 and p2
+%%  {add, n3, p1}]              %% add    n3 to p1
+%%
+%% TODO handle the case of more than one node for the partitions to merge
+%%
+get_transformation_ops(add, NewNode, Partitions, K) ->
+    NonFullPartition = fun(_K, V) -> length(V) < K end, 
     NonFullPartitions = maps:filter(NonFullPartition, Partitions), 
     case maps:size(NonFullPartitions) of
         0 ->  %% All partitions are full, create a new one
-            PartitionID = maps:size(Partitions),
-            Scenario = {add_partition, PartitionID},
-            NewPartitions = maps:put(PartitionID, [NewNode], Partitions),
-            {Scenario, NewPartitions};
+            PartitionID = get_new_partition_id(Partitions),
+            [{add_partition, NewNode, PartitionID}];
         _ ->  %% At least one partition has less than K replicas
               %% Add the node to the first non-full one
             PartitionID = hd(maps:keys(NonFullPartitions)),
-            Nodes = maps:get(PartitionID, Partitions),
-            Scenario = {add, PartitionID},
-            NewPartitions = maps:put(PartitionID, Nodes ++ [NewNode], Partitions),
-            {Scenario, NewPartitions}
+            [{add, NewNode, PartitionID}]
     end;
 
-update_partitions(Partitions, remove, RemovedNode, _ReplicasPerPartition) ->
-    %% return {Scenario, NewPartitions}
-    %% Scenario can be equal to:
-    %%   - {remove, AffectedPartitionID} --> 
-    %%          the partition the node belongs to has more than 1 node
-    %%   - {remove_partition, RemovedPartitionID} --> 
-    %%          the removed node is the last of the partition, delete the partition 
-    %%
-    PartitionID = get_partition_id(RemovedNode, Partitions),
+get_transformation_ops(remove, NodeToRemove, Partitions, K) ->
+    PartitionID = get_partition_id(NodeToRemove, Partitions),
     Nodes = maps:get(PartitionID, Partitions),
     case length(Nodes) of
-        1 ->  %% The node is the only one in the partition, remove the partition 
-            Scenario = {remove_partition, PartitionID},
-            NewPartitions = maps:remove(PartitionID, Partitions),
-            {Scenario, NewPartitions};
+        1 ->  %% The node is the only one in the partition, 
+              %% remove the node and the partition 
+            [{remove_partition, NodeToRemove, PartitionID}];
         _ ->  %% The node is not the only one in the partition, remove the node
-            Scenario = {remove, PartitionID},
-            NewPartitions = maps:put(PartitionID, Nodes -- [RemovedNode], Partitions),
-            {Scenario, NewPartitions}
+              %% and check if there is a possibility to merge the affected partition
+              %% with another non-full one
+            FirstOp = {remove, NodeToRemove, PartitionID},
+            NewPartitions = maps:put(PartitionID, Nodes -- [NodeToRemove], Partitions),
+            case can_merge_partitions(NewPartitions, K) of
+                {true, FromID, ToID} ->
+                    %% Move all the nodes from the From partition to
+                    %% the To partition, then remove the From partition
+                    NodesToMove = maps:get(FromID, Partitions),
+                    AddOps    = [{add,    Node, ToID}   || Node <- NodesToMove],
+                    RemoveOps = [{remove, Node, FromID} || Node <- tl(NodesToMove)],
+                    LastOp = {remove_partition, hd(NodeToRemove), FromID}, 
+                    [FirstOp] ++ AddOps ++ RemoveOps ++ [LastOp];
+                false ->
+                    [FirstOp]
+            end
+    end.
+
+
+
+get_new_partition_id(Partitions) ->
+    %% Pick the lowest free partition_id starting from 0
+    IDs = maps:keys(Partitions),
+    get_new_partition_id(0, IDs).
+
+get_new_partition_id(ID, []) -> ID;
+get_new_partition_id(ID, IDs) ->
+    case lists:member(ID, IDs) of
+        false -> ID;
+        true  -> get_new_partition_id(ID+1, IDs)
+    end.
+
+
+can_merge_partitions(Partitions, K) ->
+    %% If two partitions can be merged (sum of both nodes <= K)
+    %% then return {true, FromID, ToID}, false otherwise
+    GetSize = fun(_ID, Nodes) -> length(Nodes) end,
+    PartitionSizes = maps:map(GetSize, Partitions),
+    IsNonFull = fun(_ID, Size) -> Size < K end,
+    NonFullSizes = maps:filter(IsNonFull, PartitionSizes),
+    SubtractFromK = fun({ID, Size}) -> {ID, K-Size} end,
+    TargetSizes = lists:map(SubtractFromK, maps:to_list(NonFullSizes)),
+    FindMatch = fun({ID, Target}, AccMatches) ->
+                        find_match(ID, Target, AccMatches, NonFullSizes, K) end,
+    Matches = lists:foldl(FindMatch, [], TargetSizes),
+    case Matches of
+        [] -> false;
+        [{FromID, ToID}|_]-> {true, FromID, ToID}
+    end.
+
+
+find_match(ID, Target, AccMatches, NonFullSizes, K) ->
+    IsPossibleMatch = fun(OtherID, Size) ->
+                          ID =/= OtherID andalso
+                          Target =:= Size end,
+    PossibleMatches = maps:filter(IsPossibleMatch, NonFullSizes),
+    case maps:size(PossibleMatches) of
+        0 -> AccMatches;
+        _ -> 
+            OtherID = hd(maps:keys(PossibleMatches)),
+            OtherSize = Target,
+            MySize = K - Target,
+            NewMatch = case OtherSize > MySize of
+                           true  -> {ID, OtherID};
+                           false -> {OtherID, ID}
+                        end,
+            AccMatches ++ [NewMatch]
     end.
 
 
@@ -211,44 +289,4 @@ delete_token(Token, Tokens) ->
     %% You got it
     Tokens--[Token].
 
-%%%%%%%% TESTS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-dump(Data) ->
-    io:format("~p~n", [Data]).
-
-test_common() ->
-    TokensPerPartition = 3,
-    K = 4,
-    IPPortListStr = "10.0.0.20:8080,10.0.0.21:8080,10.0.0.22:8080," ++
-                    "10.0.0.23:8080,10.0.0.24:8080,10.0.0.25:8080",
-    Partitions = gen_partitions(IPPortListStr, K),
-    dump(Partitions),
-    Tokens = gen_tokens(maps:size(Partitions), TokensPerPartition),
-    dump(lists:sort(Tokens)),
-    Tokens.
-
-test_keyowner() ->
-    Tokens = test_common(),
-    Keys = ["One", "Two", "Three", "Four", "Five", "Six"],
-    KeyHashes = [hash(Key) || Key <- Keys],
-    [dump({H, K}) || {H, K} <- lists:zip(KeyHashes, Keys)],
-    KeyOwners = [get_key_owner_token(Key, Tokens) || Key <- Keys],
-    [dump({H, O}) || {H, O} <- lists:zip(KeyHashes, KeyOwners)].
-
-test_prev() ->
-    Tokens = test_common(),
-    Keys = ["One", "Two", "Three", "Four", "Five", "Six"],
-    KeyHashes = [hash(Key) || Key <- Keys],
-    [dump({H, K}) || {H, K} <- lists:zip(KeyHashes, Keys)],
-    Prevs = [get_prev({Hash, null}, Tokens) || Hash <- KeyHashes],
-    [dump({P, H}) || {H, P} <- lists:zip(KeyHashes, Prevs)].
-
-test_wraparound() ->
-    Tokens = [{10, node1}, {20, node2}, {30, node3}],
-    Hashes = [5, 15, 25, 35],
-    Prevs = [get_prev({Hash, null}, Tokens) || Hash <- Hashes],
-    Nexts = [get_next({Hash, null}, Tokens) || Hash <- Hashes],
-    [{30, node3}, {10, node1}, {20, node2}, {30, node3}] = Prevs, 
-    [{10, node1}, {20, node2}, {30, node3}, {10, node1}] = Nexts, 
-    [dump({P,H,N}) || {P,H,N} <- lists:zip3(Prevs, Hashes, Nexts)].
 

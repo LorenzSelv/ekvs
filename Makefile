@@ -23,3 +23,6 @@ tests:
 	- rm test/pics/*
 	- rm test/snapshots/*
 	python test/distribution_test.py
+
+eunit:
+	rebar3 eunit --dir="test"
