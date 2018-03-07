@@ -6,6 +6,7 @@
 -export([get_timestamp/0]).
 -export([causal_payload_to_vector_clock/1]).
 -export([vector_clock_to_causal_payload/1]).
+-export([happens_before/2]).
 
 -ifdef(TEST).
 -compile(export_all).
@@ -52,6 +53,8 @@ vector_clock_to_causal_payload(VC) ->
 
 
 happens_before(VCa, VCb) when is_map(VCa) andalso is_map(VCb) ->
+    %% Standard happens_before relationship for vector clocks
+    %%
     VCaKeys = maps:keys(VCa),
     VCbKeys = maps:keys(VCb),
     %% First make sure the nodes are the same (Keys)

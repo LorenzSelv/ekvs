@@ -44,8 +44,8 @@ put(Key, KVSValue) when is_record(KVSValue, kvsvalue) ->
     gen_server:call(?MODULE, {put_kvsvalue, Key, KVSValue}).
 
 
-put_list(KeyValueHashList) when is_list(KeyValueHashList) ->
-    gen_server:call(?MODULE, {put_list, KeyValueHashList}).
+put_list(KVSEntries) when is_list(KVSEntries) ->
+    gen_server:call(?MODULE, {put_list, KVSEntries}).
 
 
 delete(Key) ->
@@ -125,6 +125,8 @@ handle_call({delete, Key}, _From, KVS) ->
     {reply, Reply, maps:remove(Key, KVS)};
 
 
+handle_call({put_list, []}, _From, KVS) -> {reply, ok, KVS};
+
 handle_call({put_list, KVSEntries}, _From, KVS) ->
     Put = fun ({Key, KVSValue}, Map) ->
             ResolvedKVSValue = resolve_put(Key, KVSValue, Map),
@@ -132,6 +134,8 @@ handle_call({put_list, KVSEntries}, _From, KVS) ->
     NewKVS = lists:foldl(Put, KVS, KVSEntries),
     {reply, ok, NewKVS};
 
+
+handle_call({delete_list, []}, _From, KVS) -> {reply, ok, KVS};
 
 %% TODO delete is not a delete, is a put deleted
 handle_call({delete_list, KeysToDelete}, _From, KVS) ->

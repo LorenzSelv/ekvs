@@ -148,7 +148,7 @@ get_transformation_ops(remove, NodeToRemove, Partitions, K) ->
                 {true, FromID, ToID} ->
                     %% Move all the nodes from the From partition to
                     %% the To partition, then remove the From partition
-                    NodesToMove = maps:get(FromID, Partitions),
+                    NodesToMove = maps:get(FromID, NewPartitions),
                     AddOps    = [{add,    Node, ToID}   || Node <- NodesToMove],
                     RemoveOps = [{remove, Node, FromID} || Node <- tl(NodesToMove)],
                     LastOp = {remove_partition, hd(NodesToMove), FromID}, 

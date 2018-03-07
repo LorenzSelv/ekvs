@@ -268,7 +268,7 @@ def test_partitions():
     # assert ???num_keys == get_totnumkey()
     # RYW(num_keys)
 
-    snapshot_to_file('init')
+    snapshot_to_file('0init')
     
     partition_ids1 = get_partition_ids(rnode())
     print(partition_ids1)
