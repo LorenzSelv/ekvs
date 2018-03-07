@@ -12,7 +12,7 @@
 -define(HEADER, #{<<"content-type">> => <<"application/json">>}).
 
 %% Response Bodies
--define(BODY_GET(Value, Owner), 
+-define(BODY_GET(Value, Payload, Timestamp), 
     jsx:encode(#{
         <<"msg">> => <<"success">>, 
         <<"value">> => Value, 
@@ -26,9 +26,10 @@
     jsx:encode(#{
         <<"replaced">> => Replaced, %REMOVE replaced
         <<"msg">> => <<"success">>,
+        <<"partition_id">> => PartitionID, 
         <<"causal_payload">> => Payload, 
         <<"timestamp">> => Timestamp,
-        <<"owner">> => Owner}
+        <<"owner">> => Owner} % REMOVE owner
     )).
 
 -define(BODY_DELETE, jsx:encode(#{<<"msg">> => <<"success">>})).
@@ -47,8 +48,8 @@ init(Req0=#{ method := <<"GET">> }, State) ->
     Req = try parse_body(get, Req0) of
             {true, Key, Payload} -> %% Legal key
                 case kvs_query(get, [Key, Payload]) of
-                    {{ok, Value}, Owner} ->
-                        cowboy_req:reply(200, ?HEADER, ?BODY_GET(Value, Owner), Req0);
+                    {{ok, Value, Payload, Timestamp}, Owner} ->
+                        cowboy_req:reply(200, ?HEADER, ?BODY_GET(Value, Payload, Timestamp), Req0);
                     {error, _Owner} ->
                         cowboy_req:reply(404, ?HEADER, ?BODY_KEYERROR, Req0);
                     {{badrpc, Reason}, _Owner} ->
@@ -67,12 +68,10 @@ init(Req0=#{ method := <<"GET">> }, State) ->
 init(Req0=#{ method := Method }, State)
         when Method =:= <<"PUT">> orelse Method =:= <<"POST">> ->
     Req = try parse_body(put, Req0) of
-            {true, Key, Value} -> %% Legal key
-                case kvs_query(put, [Key, Value]) of
-                    {{replaced, true}, Owner} ->
-                        cowboy_req:reply(200, ?HEADER, ?BODY_PUT(1, Owner), Req0);
-                    {{replaced, false}, Owner} ->
-                        cowboy_req:reply(201, ?HEADER, ?BODY_PUT(0, Owner), Req0);
+            {true, Key, Value, Payload} -> %% Legal key
+                case kvs_query(put, [Key, Value, Payload]) of
+                    {{Payload, Timestamp}, Owner} ->
+                        cowboy_req:reply(200, ?HEADER, ?BODY_PUT(1, Owner), Req0); 
                     {{badrpc, Reason}, _Owner} ->
                         node_down_reply(Reason, Req0)
                 end;
@@ -123,10 +122,12 @@ call_with_timeout(Node, Module, Func, Args, Timeout) ->
     end.
     
 
-kvs_query(Func, Args) ->
+kvs_query(Func, Args) -> %this will need to be edited
     %% Execute a query on the kvs
     %% If the node is the main node, execute the query directly
     %% If the node is a forwarder node, execute the query remotely using a rpc
+    
+    %need some function to get the partition ID
     lab4kvs_debug:call({kvs_query, Func}),
     Key = case Args of 
             [K,_] -> K;

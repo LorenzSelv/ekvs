@@ -68,13 +68,13 @@ handle_call({get, Key}, _From, KVS) when is_map(KVS) ->
     Reply = case maps:find(Key, KVS) of
                 {ok, {Value, _Hash}} -> {ok, Value};
                 error -> error
-            end,
+            end, %the val returned from maps:find should be a tuple containing the value, timestamp, and causal payload
     {reply, Reply, KVS};
 
 handle_call({put, Key, Value}, _From, KVS) when is_map(KVS) ->
     Hash  =  lab4kvs_viewutils:hash(Key),
     Reply = {replaced, maps:is_key(Key, KVS)},
-    {reply, Reply, maps:put(Key, {Value, Hash}, KVS)};
+    {reply, Reply, maps:put(Key, {Value, Hash}, KVS)};%put value, timestamp, and causal payload under key
 
 handle_call({put, Key, Value, Hash}, _From, KVS) when is_map(KVS) ->
     Reply = {replaced, maps:is_key(Key, KVS)},
