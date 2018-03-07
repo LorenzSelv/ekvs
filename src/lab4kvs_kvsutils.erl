@@ -7,8 +7,9 @@
 -export([causal_payload_to_vector_clock/1]).
 -export([vector_clock_to_causal_payload/1]).
 
--export([test_CP_VC/0]).
--export([test_happens_before/0]).
+-ifdef(TEST).
+-compile(export_all).
+-endif.
 
 
 get_timestamp() ->
@@ -63,76 +64,4 @@ happens_before(VCa, VCb) when is_map(VCa) andalso is_map(VCb) ->
     LessOrEqual = lists:all(fun({Ca, Cb}) -> Ca =< Cb end, Clocks),
     Less        = lists:any(fun({Ca, Cb}) -> Ca  < Cb end, Clocks),
     LessOrEqual andalso Less.
-
-    
-
-%%%%%%%% TESTS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-test_CP_VC() ->
-    CP = <<"node@10.0.0.0:1,node@10.0.0.2:4,node@10.0.0.3:3">>,
-    VC = causal_payload_to_vector_clock(CP),
-    io:format("~p~n", [VC]),
-    CP = vector_clock_to_causal_payload(VC).
-
-test_happens_before(1) ->
-    %% a -> b
-    VCa = #{n0 => 0, n1 => 2, n2 => 3},
-    VCb = #{n0 => 1, n1 => 3, n2 => 4},
-    true  = happens_before(VCa, VCb),
-    false = happens_before(VCb, VCa),
-    ok;
-
-test_happens_before(2) ->
-    %% a -> b
-    VCa = #{n0 => 1, n1 => 3, n2 => 3},
-    VCb = #{n0 => 1, n1 => 3, n2 => 4},
-    true  = happens_before(VCa, VCb),
-    false = happens_before(VCb, VCa),
-    ok;
-
-test_happens_before(3) ->
-    %% b -> a
-    VCa = #{n0 => 1, n1 => 3, n2 => 4},
-    VCb = #{n0 => 0, n1 => 3, n2 => 4},
-    false = happens_before(VCa, VCb),
-    true  = happens_before(VCb, VCa),
-    ok;
-
-test_happens_before(4) ->
-    %% concurrent
-    VCa = #{n0 => 1, n1 => 3, n2 => 4},
-    VCb = #{n0 => 1, n1 => 3, n2 => 4},
-    false = happens_before(VCa, VCb),
-    false = happens_before(VCb, VCa),
-    ok;
-
-test_happens_before(5) ->
-    %% concurrent
-    VCa = #{n0 => 1, n1 => 4, n2 => 4},
-    VCb = #{n0 => 2, n1 => 3, n2 => 4},
-    false = happens_before(VCa, VCb),
-    false = happens_before(VCb, VCa),
-    ok.
-
-test_happens_before() ->
-    [test_happens_before(N) || N <- lists:seq(1,5)].
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
