@@ -1,3 +1,5 @@
+
+
 import subprocess
 import os
 from time import sleep
@@ -11,7 +13,7 @@ import numpy as np
 
 VERBOSE = False
 
-DOCKER_RUN = 'docker run -p %d:8080 --net=lab3net --ip=%s -e VIEW="%s" -e "ip_port"="%s:8080" -e TOKENSPERNODE="%d" lab3erlang'
+DOCKER_RUN = 'docker run -p %d:8080 --net=lab4net --ip=%s -e VIEW="%s" -e "ip_port"="%s:8080" -e TOKENSPERNODE="%d" lab4erlang'
 
 URL = 'http://127.0.0.1:%d/'
 
@@ -33,6 +35,8 @@ def run_new_node(view=None):
 
     ip = '10.0.0.%d' % (20+i)
     ipport = ip + ':8080'
+    if not os.path.exists('test/log/'):
+        os.makedirs('test/log/')
     logfile = open('test/log/node%d'%i, 'w')
     localport = 8080 + i
     url = URL % localport
@@ -214,6 +218,8 @@ def compare_snapshots(snap1, snap2):
     return True
 
 def snapshot_to_file(filename):
+    if not os.path.exists('test/snapshots/'):
+        os.makedirs('test/snapshots/')
     with open('test/snapshots/%s.snap' % filename, "w") as f:
         f.write('\n'.join(inspect_nodes()))
 
