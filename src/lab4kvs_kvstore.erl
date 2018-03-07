@@ -41,7 +41,7 @@ put(Key, Value, CausalPayload) ->
 
 put(Key, KVSValue) when is_record(KVSValue, kvsvalue) ->
     %% put returns {ok, CausalPayload, Timestamp}
-    gen_server:call(?MODULE, {put_kvsvalue, Key, Value, CausalPayload}).
+    gen_server:call(?MODULE, {put_kvsvalue, Key, KVSValue}).
 
 
 put_list(KeyValueHashList) when is_list(KeyValueHashList) ->
@@ -146,7 +146,7 @@ handle_call(all, _From, KVS) ->
 
 
 handle_call({keyrange, Start, End}, _From, KVS) ->
-    InRange = fun(_Key, V#kvsvalue{hash=Hash}) ->
+    InRange = fun(_Key, #kvsvalue{hash=Hash}) ->
                       Start =< Hash andalso Hash =< End end,
     KVSRange = maps:to_list(maps:filter(InRange, KVS)),
     {reply, KVSRange, KVS};
@@ -197,14 +197,20 @@ resolve_put(Key, NewKVSValue, KVS) ->
     end.
 
 
-latest_kvsvalue(Va#kvsvalue{vector_clock=VCa, timestamp=TSa},
-                Vb#kvsvalue{vector_clock=VCb, timestamp=TSb}) ->
-    if
-        lab4kvs_kvsutils:happens_before(VCa, VCb) -> Va;
-        lab4kvs_kvsutils:happens_before(VCb, VCa) -> Vb;
-        %% concurrent
-        TSa > TSb -> Va;
-        TSb > TSa -> Vb;
-        %% same timestamp, pick the first one
-        true -> Va
+latest_kvsvalue(Va = #kvsvalue{vector_clock=VCa, timestamp=TSa},
+                Vb = #kvsvalue{vector_clock=VCb, timestamp=TSb}) ->
+    case lab4kvs_kvsutils:happens_before(VCa, VCb) of 
+        true  -> Va;
+        false ->
+            case lab4kvs_kvsutils:happens_before(VCb, VCa) of
+                true  -> Vb;
+                false ->
+                    %% concurrent
+                    if 
+                        TSa > TSb -> Va;
+                        TSb > TSa -> Vb;
+                        %% same timestamp, pick the first one
+                        true -> Va
+                    end
+            end
     end.
