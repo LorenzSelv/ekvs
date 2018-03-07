@@ -16,7 +16,7 @@
     jsx:encode(#{
         <<"msg">> => <<"success">>, 
         <<"value">> => Value, 
-        <<"parition_id">> => PartitionID, 
+        <<"partition_id">> => PartitionID, 
         <<"causal_payload">> => Payload, 
         <<"timestamp">> => Timestamp,
         <<"owner">> => Owner} % REMOVE owner 
