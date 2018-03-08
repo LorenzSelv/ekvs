@@ -232,7 +232,7 @@ apply_view_change_op(_Op={add, NodeToInsert, AffectedPartitionID}, View = #view{
         true -> %% I belong to the affected partition and I have been 
                 %% selected to replicate my keys in the new node
             EntriesToReplicate = lab4kvs_kvstore:get_all_entries(),
-            rpc:call(NodeToInsert, lab4kvs_kvstore, put, [EntriesToReplicate]);
+            rpc:call(NodeToInsert, lab4kvs_kvstore, put_list, [EntriesToReplicate]);
         false -> %% Nothing to do
             io:format("Node ~p replicates its key to ~p~n", [SelectedNode, NodeToInsert])
     end,
@@ -332,18 +332,18 @@ move_entries(KVSEntries, DestNode) when is_list(KVSEntries) ->
     %%
     io:format("Moving entries ~p to ~p~n", [KVSEntries, DestNode]),
     %% Move the entries to the new node
-    rpc:call(DestNode, lab4kvs_kvstore, put, [KVSEntries]),
+    rpc:call(DestNode, lab4kvs_kvstore, put_list, [KVSEntries]),
     %% Delete the local copy
     lab4kvs_kvstore:delete_list([Key || {Key, _} <- KVSEntries]),
     io:format("Moved  entries ~p to ~p~n", [KVSEntries, DestNode]).
 
-move_entry({Key, {Val, Hash}}, DestNode) ->
+move_entry({Key, KVSValue}, DestNode) ->
     %% RPC to destnode to insert the key, local call to delete the key
     %%
-    io:format("Moving entry ~p to ~p~n", [{Key, {Val, Hash}}, DestNode]),
-    rpc:call(DestNode, lab4kvs_kvstore, put, [Key, Val, Hash]),
+    io:format("Moving entry ~p to ~p~n", [{Key, KVSValue}, DestNode]),
+    rpc:call(DestNode, lab4kvs_kvstore, put, [Key, KVSValue]),
     lab4kvs_kvstore:delete(Key),
-    io:format("Moved  entry ~p to ~p~n", [{Key, {Val, Hash}}, DestNode]).
+    io:format("Moved entry ~p to ~p~n", [{Key, KVSValue}, DestNode]).
 
 
 get_all_nodes(Partitions) ->
