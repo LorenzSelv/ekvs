@@ -6,6 +6,7 @@
 
 %% API interface
 -export([start_link/3]).
+-export([get_num_partitions/0]).
 -export([get_partition_id/0]).
 -export([get_partition_ids/0]).
 -export([get_partition_members/1]).
@@ -48,6 +49,10 @@ start_link(IPPortList, TokensPerPartition, ReplicasPerPartition) ->
     gen_server:start_link(?MODULE, [IPPortList, TokensPerPartition, ReplicasPerPartition], []).
 
 
+get_num_partitions() ->
+    gen_server:call(whereis(num_partitions), num_partitions).
+
+
 get_partition_id() ->
     gen_server:call(whereis(view_manager), partition_id).
 
@@ -71,7 +76,8 @@ get_key_partition_id(Key) ->
 
 
 view_change(Type, IPPort) when Type =:= <<"add">> orelse Type =:= <<"remove">> ->
-    %% Broadcast message and redistribute keys
+    %% Broadcast message and redistribute keys.
+    %% On add, return the partition id of the new node
     Node = lab4kvs_viewutils:get_node_name(binary_to_list(IPPort)),
     gen_server:call(whereis(view_manager), {view_change, binary_to_atom(Type, latin1), Node}).
 
@@ -95,6 +101,10 @@ init([IPPortList, TokensPerPartition, ReplicasPerPartition]) ->
                replicas_per_partition=ReplicasPerPartition}}.
 
 
+handle_call(num_partitions, _From, View = #view{partitions=Partitions}) ->
+    {reply, maps:size(Partitions), View};
+
+
 handle_call(partition_id, _From, View = #view{partition_id=PartitionID}) ->
     {reply, PartitionID, View};
 
@@ -107,8 +117,7 @@ handle_call({partition_members, ID}, _From, View = #view{partitions=Partitions})
     {reply, maps:get(ID, Partitions), View};
 
 
-handle_call({keyowner, Key}, _From, View = #view{partitions=Partitions,
-                                                 tokens=Tokens}) ->
+handle_call({keyowner, Key}, _From, View = #view{tokens=Tokens}) ->
     {_Hash, PartitionID} = lab4kvs_viewutils:get_key_owner_token(Key, Tokens), 
     {reply, PartitionID, View};
 
@@ -133,8 +142,16 @@ handle_call({view_change, Type, NodeChanged}, _From, View = #view{partitions=Par
     NewView = apply_view_change(Type, NodeChanged, View),
     wait_ack_view_change(Ref, NodesToBroadcast),
 
+    Reply = case Type of
+                add ->  %% On add, it should return the partition 
+                        %% id of the new node
+                    lab4kvs_kvsutils:get_partition_id(NodeChanged, 
+                                                      NewView#view.partitions);
+                remove ->
+                    ok
+            end,
     %% lab4kvs_debug:return({view_change, Type}, NewView),
-    {reply, view_changed, NewView};
+    {reply, Reply, NewView};
 
 
 handle_call(dump, _From, View = #view{partition_id=PartitionID,

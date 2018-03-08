@@ -45,6 +45,7 @@ get_partition_id(Node, [{ID, Nodes}|Partitions]) ->
     end;
 
 get_partition_id(Node, Partitions) ->
+    %% Return the partition id the node belongs to
     get_partition_id(Node, maps:to_list(Partitions)).
 
 

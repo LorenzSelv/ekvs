@@ -25,14 +25,14 @@ exec(Func, Args) ->
     {Result, KeyPartitionID}.
 
 
-run_kvs_query_at(Nodes, Func, Args) ->
+run_kvs_query_at(_Nodes, _Func, _Args) ->
     %% TODO
     ok.
 
 
 local_call(Module, Func, Args) ->
     %% Execute a local call to Module:Func(Args)
-    apply(Module, Func, Args)
+    apply(Module, Func, Args).
 
 
 rpc_call_until_success(Node, Module, Func, Args) ->
@@ -43,10 +43,10 @@ rpc_call_until_success(Node, Module, Func, Args) ->
     %% The return value of the RPC call is ignored, since
     %% this function returns immediately after having spawned the process.
     %%
-    LoopRPC = fun() ->
+    LoopRPC = fun Loop() ->
                   case rpc_call_with_timeout(Node, Module, Func, Args, 2) of 
                       {ok, _Result} -> ok;
-                      {badrpc, timeout} -> LoopRPC()
+                      {badrpc, timeout} -> Loop()
                   end
               end,
     _Pid = spawn(LoopRPC).

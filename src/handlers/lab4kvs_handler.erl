@@ -18,16 +18,16 @@
         <<"value">> => Value,
         <<"partition_id">> => PartitionID,
         <<"causal_payload">> => Payload,
-        <<"timestamp">> => Timestamp,
-    )).
+        <<"timestamp">> => Timestamp
+     })).
 
 -define(BODY_PUT(PartitionID, Payload, Timestamp), 
     jsx:encode(#{
         <<"msg">> => <<"success">>,
         <<"partition_id">> => PartitionID, 
         <<"causal_payload">> => Payload, 
-        <<"timestamp">> => Timestamp,
-    )).
+        <<"timestamp">> => Timestamp
+     })).
 
 -define(BODY_DELETE, jsx:encode(#{<<"msg">> => <<"success">>})).
 
@@ -44,7 +44,7 @@
 init(Req0=#{ method := <<"GET">> }, State) ->
     Req = try parse_querystring(Req0) of
             {true, Key, Payload} -> %% Legal key
-                get_kvs_query(Key, Payload);
+                get_kvs_query(Key, Payload, Req0);
             {false, _} -> %% Illegal key
                 cowboy_req:reply(404, ?HEADER, ?BODY_ILLEGALKEY, Req0)
         catch %% Missing key or value
@@ -59,7 +59,7 @@ init(Req0=#{ method := Method }, State)
         when Method =:= <<"PUT">> orelse Method =:= <<"POST">> ->
     Req = try parse_body(Req0) of
             {true, Key, Value, Payload} -> %% Legal key
-                put_kvs_query(Key, Value, Payload);
+                put_kvs_query(Key, Value, Payload, Req0);
             {false, _, _} -> %% Illegal key
                 cowboy_req:reply(404, ?HEADER, ?BODY_ILLEGALKEY, Req0)
         catch %% Missing key or value
@@ -72,7 +72,7 @@ init(Req0=#{ method := Method }, State)
 init(Req0=#{ method := <<"DELETE">> }, State) ->
     Req = try parse_querystring(Req0) of
             {true, Key, Payload} -> %% Legal key
-                delete_kvs_query(Key, Payload);
+                delete_kvs_query(Key, Payload, Req0);
             {false, _} -> %% Illegal key
                 cowboy_req:reply(404, ?HEADER, ?BODY_ILLEGALKEY, Req0)
         catch %% Missing key or value
@@ -84,7 +84,7 @@ init(Req0=#{ method := <<"DELETE">> }, State) ->
 
 %%%%%%%%%%%%%%%% Internal functions %%%%%%%%%%%%%%%%
 
-get_kvs_query(Key, Payload) ->
+get_kvs_query(Key, Payload, Req0) ->
     case lab4kvs_kvsquery:exec(get, [Key, Payload]) of
         {ok, Value, PartitionID, Payload, Timestamp} ->
             Body = ?BODY_GET(Value, PartitionID, Payload, Timestamp),
@@ -96,7 +96,7 @@ get_kvs_query(Key, Payload) ->
     end.
 
 
-put_kvs_query(Key, Value, Payload) ->
+put_kvs_query(Key, Value, Payload, Req0) ->
     case lab4kvs_kvsquery:exec(put, [Key, Value, Payload]) of
         {ok, PartitionID, Payload, Timestamp} ->
             Body = ?BODY_PUT(PartitionID, Payload, Timestamp),
@@ -107,7 +107,7 @@ put_kvs_query(Key, Value, Payload) ->
 
 
 %% TODO delete key
-delete_kvs_query(Key, Payload) ->
+delete_kvs_query(Key, Payload, Req0) ->
     case klab4kvs_kvsquery:exec(delete, [Key, Payload]) of
         {deleted,  true} ->
             cowboy_req:reply(200, ?HEADER, ?BODY_DELETE, Req0);
@@ -124,24 +124,20 @@ node_down_reply(Reason, Req) ->
     cowboy_req:reply(404, ?HEADER, ?BODY_NODEDOWN, Req).
 
 
-parse_querystring(get, Req) ->
+parse_querystring(Req) ->
     %% Extract query string values
     Data = cowboy_req:parse_qs(Req),
-    {_, Key} = lists:keyfind(<<"key">>, 1, Data),
+    {_, Key}     = lists:keyfind(<<"key">>, 1, Data),
     {_, Payload} = lists:keyfind(<<"causal_payload">>, 1, Data),
-    {legal_key(Key), Key, Payload};
+    {legal_key(Key), Key, Payload}.
 
 
 parse_body(Req) ->
     %% PUT or POST requests
     {ok, Data, _} = cowboy_req:read_urlencoded_body(Req),
-    {_, Key}   = lists:keyfind(<<"key">>,   1, Data),
-    {_, Value} = lists:keyfind(<<"value">>, 1, Data),
-    
-    Payload = case lists:keyfind(<<"causal_payload">>, 1, Data) of
-        {_, Payload} -> Payload; 
-        false -> <<"">>,
-    end,
+    {_, Key}     = lists:keyfind(<<"key">>,   1, Data),
+    {_, Value}   = lists:keyfind(<<"value">>, 1, Data),
+    {_, Payload} = lists:keyfind(<<"causal_payload">>, 1, Data),
     {legal_key(Key), Key, Value, Payload}.
 
 
