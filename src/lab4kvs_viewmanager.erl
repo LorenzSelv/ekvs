@@ -9,7 +9,7 @@
 -export([get_partition_id/0]).
 -export([get_partition_ids/0]).
 -export([get_partition_members/1]).
--export([get_key_owners/1]).
+-export([get_key_owner_id/1]).
 -export([get_key_partition_id/1]).
 -export([view_change/2]).
 
@@ -60,9 +60,9 @@ get_partition_members(PartitionID) ->
     gen_server:call(whereis(view_manager), {partition_members, PartitionID}).
 
 
-get_key_owners(Key) ->
-    %% Return the nodes of the partition that owns the key
-    gen_server:call(whereis(view_manager), {keyowners, Key}).
+get_key_owner_id(Key) ->
+    %% Return the ID of the partition that owns the key
+    gen_server:call(whereis(view_manager), {keyowner, Key}).
 
 
 get_key_partition_id(Key) ->
@@ -107,11 +107,10 @@ handle_call({partition_members, ID}, _From, View = #view{partitions=Partitions})
     {reply, maps:get(ID, Partitions), View};
 
 
-handle_call({keyowners, Key}, _From, View = #view{partitions=Partitions,
-                                                  tokens=Tokens}) ->
+handle_call({keyowner, Key}, _From, View = #view{partitions=Partitions,
+                                                 tokens=Tokens}) ->
     {_Hash, PartitionID} = lab4kvs_viewutils:get_key_owner_token(Key, Tokens), 
-    KeyOwners = maps:get(PartitionID, Partitions),
-    {reply, KeyOwners, View};
+    {reply, PartitionID, View};
 
 
 handle_call({keyowner_partition, Key}, _From, View = #view{tokens=Tokens}) ->

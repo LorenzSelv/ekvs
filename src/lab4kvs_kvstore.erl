@@ -93,7 +93,7 @@ handle_call({get, Key}, _From, KVS) ->
                     CausalPayload = lab4kvs_kvsutils:vector_clock_to_causal_payload(VC),
                     {ok, Value, CausalPayload, Timestamp};
                 error -> error
-            end,
+            end, %the val returned from maps:find should be a tuple containing the value, timestamp, and causal payload
     {reply, Reply, KVS};
 
 
