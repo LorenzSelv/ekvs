@@ -24,6 +24,10 @@ start(_StartType, _StartArgs) ->
     %% Register the view_manager so it can receive messages from other nodes
     true = register(view_manager, PidVM),
 
+    %% Start the vector clock manager
+    {ok, _} = lab4kvs_vcmanager:start_link(),
+    %% TODO register ?
+
     %% Define mapping routes - handlers
     Dispatch = cowboy_router:compile([
             {'_', [

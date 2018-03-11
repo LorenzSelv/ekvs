@@ -12,6 +12,7 @@
 -export([get_partition_members/1]).
 -export([get_key_owner_id/1]).
 -export([get_key_partition_id/1]).
+-export([get_all_nodes/0]).
 -export([view_change/2]).
 
 -export([dump/0]).
@@ -50,7 +51,7 @@ start_link(IPPortList, TokensPerPartition, ReplicasPerPartition) ->
 
 
 get_num_partitions() ->
-    gen_server:call(whereis(num_partitions), num_partitions).
+    gen_server:call(whereis(view_manager), num_partitions).
 
 
 get_partition_id() ->
@@ -74,6 +75,9 @@ get_key_partition_id(Key) ->
     %% Return the partition_id of the partition that owns the key
     gen_server:call(whereis(view_manager), {keyowner_partition, Key}).
 
+get_all_nodes() ->
+    %% Return a list of all nodes in the partitions 
+    gen_server:call(whereis(view_manager), all_nodes).
 
 view_change(Type, IPPort) when Type =:= <<"add">> orelse Type =:= <<"remove">> ->
     %% Broadcast message and redistribute keys.
@@ -127,6 +131,11 @@ handle_call({keyowner_partition, Key}, _From, View = #view{tokens=Tokens}) ->
     {reply, PartitionID, View};
 
 
+handle_call(all_nodes, _From, View = #view{partitions=Partitions}) ->
+    Nodes = get_all_nodes(Partitions), 
+    {reply, Nodes, View};
+
+
 handle_call({view_change, Type, NodeChanged}, _From, View = #view{partitions=Partitions}) ->
     %% Update the partitions: 
     %%   - a new partition is created iff all partitions have already K nodes
@@ -145,7 +154,7 @@ handle_call({view_change, Type, NodeChanged}, _From, View = #view{partitions=Par
     Reply = case Type of
                 add ->  %% On add, it should return the partition 
                         %% id of the new node
-                    lab4kvs_kvsutils:get_partition_id(NodeChanged, 
+                    lab4kvs_vcmanager:get_partition_id(NodeChanged, 
                                                       NewView#view.partitions);
                 remove ->
                     ok

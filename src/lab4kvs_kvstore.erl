@@ -15,6 +15,8 @@
 -export([get_all_entries/0]).
 -export([get_keyrange_entries/2]).
 -export([get_numkeys/0]).
+-export([prepare_kvsvalue/3]).
+
 
 -export([dump/0]).
 
@@ -31,6 +33,8 @@ start_link() ->
 
 
 get(Key) ->
+    %% Return {ok, Value, CausalPayload, Timestamp};
+    %%     or keyerror
     gen_server:call(?MODULE, {get, Key}).
 
 
@@ -86,37 +90,44 @@ init(_Args) ->
 handle_call({get, Key}, _From, KVS) ->
     Reply = case maps:find(Key, KVS) of
                 %% TODO handle deleted keys
-                %% {ok, #kvsvalue{value=deleted}} -> error;
+                %% {ok, #kvsvalue{value=deleted}} -> keyerror;
                 {ok, #kvsvalue{value=Value,
                                vector_clock=VC,
                                timestamp=Timestamp}} ->
-                    CausalPayload = lab4kvs_kvsutils:vector_clock_to_causal_payload(VC),
+                    CausalPayload = lab4kvs_vcmanager:vc_to_cp(VC),
                     {ok, Value, CausalPayload, Timestamp};
-                error -> error
-            end, %the val returned from maps:find should be a tuple containing the value, timestamp, and causal payload
+                error -> keyerror
+            end,
     {reply, Reply, KVS};
 
 
 handle_call({put, Key, Value, CausalPayload}, _From, KVS) ->
-    Timestamp = lab4kvs_kvsutils:get_timestamp(),
-    Hash = lab4kvs_viewutils:hash(Key),
-    VC   = lab4kvs_kvsutils:causal_payload_to_vector_clock(CausalPayload),
-    KVSValue = #kvsvalue{value=Value,
-                         hash=Hash,
-                         vector_clock=VC,
-                         timestamp=Timestamp},
-    CausalPayload = lab4kvs_kvsutils:vector_clock_to_causal_payload(VC),
-    Reply = {ok, CausalPayload, Timestamp},
+    NewVC = lab4kvs_vcmanager:new_event(CausalPayload),
+    KVSValue = prepare_kvsvalue(Key, Value, NewVC),
+    %% TODO no need to resolve
+    %% ResKVSValue = resolve_put(Key, KVSValue, KVS),
+    %% ResVC = ResKVSValue#kvsvalue.vector_clock,
+    %% ResCausalPayload = lab4kvs_vcmanager:vc_to_cp(ResVC),
+    %% ResTimestamp = ResKVSValue#kvsvalue.timestamp,
+    %% Reply = {ok, ResCausalPayload, ResTimestamp},
+    NewVC = KVSValue#kvsvalue.vector_clock, %% Assert equal
+    NewCausalPayload = lab4kvs_vcmanager:vc_to_cp(NewVC),
+    Timestamp = KVSValue#kvsvalue.timestamp,
+    Reply = {ok, NewCausalPayload, Timestamp},
+    %% {reply, Reply, maps:put(Key, ResKVSValue, KVS)};
     {reply, Reply, maps:put(Key, KVSValue, KVS)};
 
 
 handle_call({put_kvsvalue, Key, KVSValue}, _From, KVS) when is_record(KVSValue, kvsvalue) ->
     %% Resove the value against what might already be present in the KVS
-    ResolvedKVSValue = resolve_put(Key, KVSValue, KVS),
-    CausalPayload = lab4kvs_kvsutils:vector_clock_to_causal_payload(KVSValue#kvsvalue.vector_clock),
-    Timestamp = KVSValue#kvsvalue.timestamp,
-    Reply = {ok, CausalPayload, Timestamp},
-    {reply, Reply, maps:put(Key, ResolvedKVSValue, KVS)};
+    %% This function is called only for internal key transfer, 
+    %% thus no new event happened
+    ResKVSValue = resolve_put(Key, KVSValue, KVS),
+    ResVC = ResKVSValue#kvsvalue.vector_clock,
+    ResCausalPayload = lab4kvs_vcmanager:vc_to_cp(ResVC),
+    ResTimestamp = ResKVSValue#kvsvalue.timestamp,
+    Reply = {ok, ResCausalPayload, ResTimestamp},
+    {reply, Reply, maps:put(Key, ResKVSValue, KVS)};
 
 
 %% TODO delete is not a delete, is a put deleted
@@ -150,8 +161,12 @@ handle_call(all, _From, KVS) ->
 
 
 handle_call({keyrange, Start, End}, _From, KVS) ->
-    InRange = fun(_Key, #kvsvalue{hash=Hash}) ->
-                      Start =< Hash andalso Hash =< End end,
+    InRange = case Start < End of
+                true ->
+                      fun(_Key, {_Val, Hash}) -> Start =< Hash andalso Hash =< End end;
+                false ->
+                      fun(_Key, {_Val, Hash}) -> Start =< Hash orelse  Hash =< End end
+              end,
     KVSRange = maps:to_list(maps:filter(InRange, KVS)),
     {reply, KVSRange, KVS};
 
@@ -203,10 +218,10 @@ resolve_put(Key, NewKVSValue, KVS) ->
 
 latest_kvsvalue(Va = #kvsvalue{vector_clock=VCa, timestamp=TSa},
                 Vb = #kvsvalue{vector_clock=VCb, timestamp=TSb}) ->
-    case lab4kvs_kvsutils:happens_before(VCa, VCb) of 
+    case lab4kvs_vcmanager:happens_before(VCa, VCb) of 
         true  -> Va;
         false ->
-            case lab4kvs_kvsutils:happens_before(VCb, VCa) of
+            case lab4kvs_vcmanager:happens_before(VCb, VCa) of
                 true  -> Vb;
                 false ->
                     %% concurrent
@@ -218,3 +233,17 @@ latest_kvsvalue(Va = #kvsvalue{vector_clock=VCa, timestamp=TSa},
                     end
             end
     end.
+
+
+prepare_kvsvalue(Key, Value, CP) when is_binary(CP)->
+    VC = lab4kvs_vcmanager:cp_to_vc(CP),
+    prepare_kvsvalue(Key, Value, VC);
+
+prepare_kvsvalue(Key, Value, VC) when is_map(VC)->
+    Hash  = lab4kvs_viewutils:hash(Key),
+    Timestamp = lab4kvs_vcmanager:get_timestamp(),
+    #kvsvalue{value=Value,
+              hash=Hash,
+              vector_clock=VC,
+              timestamp=Timestamp}.
+

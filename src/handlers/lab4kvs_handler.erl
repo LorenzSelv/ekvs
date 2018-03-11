@@ -86,23 +86,23 @@ init(Req0=#{ method := <<"DELETE">> }, State) ->
 
 get_kvs_query(Key, Payload, Req0) ->
     case lab4kvs_kvsquery:exec(get, [Key, Payload]) of
-        {ok, Value, PartitionID, Payload, Timestamp} ->
+        {{ok, Value, Payload, Timestamp}, PartitionID} ->
             Body = ?BODY_GET(Value, PartitionID, Payload, Timestamp),
             cowboy_req:reply(200, ?HEADER, Body, Req0);
-        {error, Reason} -> %% TODO reason
+        {keyerror, _PartitionID} -> %% TODO reason
             cowboy_req:reply(404, ?HEADER, ?BODY_KEYERROR, Req0);
-        {badrpc, Reason} ->
-            node_down_reply(Reason, Req0)
+        {all_disconnected, _PartitionID} -> %% TODO Service unavailable
+            node_down_reply(all_disconnected, Req0)
     end.
 
 
 put_kvs_query(Key, Value, Payload, Req0) ->
     case lab4kvs_kvsquery:exec(put, [Key, Value, Payload]) of
-        {ok, PartitionID, Payload, Timestamp} ->
+        {{ok, Payload, Timestamp}, PartitionID} ->
             Body = ?BODY_PUT(PartitionID, Payload, Timestamp),
             cowboy_req:reply(200, ?HEADER, Body, Req0); 
-        {badrpc, Reason} ->
-            node_down_reply(Reason, Req0)
+        {badrpc, _PartitionID} ->
+            node_down_reply(badrpc, Req0)
     end.
 
 
