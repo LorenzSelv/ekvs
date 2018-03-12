@@ -18,6 +18,7 @@
 -export([cp_to_vc/1]).
 -export([vc_to_cp/1]).
 -export([happens_before/2]).
+-export([happens_before_or_equal/2]).
 
 %% Server Callbacks
 -export([init/1, terminate/2, handle_info/2, handle_cast/2, handle_call/3, code_change/3]).
@@ -66,10 +67,8 @@ update_vc(VC) ->
 %%%%% Server Callbacks %%%%% 
 
 init([]) ->
-    Nodes = lab4kvs_viewmanager:get_all_nodes(),
     %% All nodes are initialized with clock 0
-    VCList = lists:map(fun(Node) -> {Node, 0} end, Nodes),
-    VC = maps:from_list(VCList),
+    VC = get_default_vc(),
     {ok, #state{vector_clock=VC}}.
 
 
@@ -139,6 +138,14 @@ get_timestamp() ->
     TimestampStr = io_lib:format("~w-~w-~w ~w:~w:~w.~w", [Y,Mon,D,H,Min,S,MS]),
     list_to_binary(TimestampStr).
 
+
+get_default_vc() ->
+    Nodes = lab4kvs_viewmanager:get_all_nodes(),
+    %% All nodes are initialized with clock 0
+    VCList = lists:map(fun(Node) -> {Node, 0} end, Nodes),
+    maps:from_list(VCList).
+
+
 %% CausalPayload is a binary string in the format 
 %% <<"node@<ip1>:Clock1,node@<ip2>:Clock2">>
 %% 
@@ -147,6 +154,7 @@ get_timestamp() ->
 %% 'node@<ip2>' => Clock2
 %%
 
+cp_to_vc(<<"">>) -> get_default_vc();
 cp_to_vc(CausalPayload) ->
     NodeClockStrList = string:split(CausalPayload, ",", all),
     StrToPair = fun(NodeClockStr) ->
@@ -168,6 +176,7 @@ vc_to_cp(VC) ->
 
 
 happens_before(VCa, VCb) when is_map(VCa) andalso is_map(VCb) ->
+    lab4kvs_debug:call({happens_before, VCa, VCb}),
     %% Standard happens_before relationship for vector clocks
     %%
     VCaKeys = maps:keys(VCa),
@@ -183,6 +192,8 @@ happens_before(VCa, VCb) when is_map(VCa) andalso is_map(VCb) ->
     Less        = lists:any(fun({Ca, Cb}) -> Ca  < Cb end, Clocks),
     LessOrEqual andalso Less.
 
+happens_before_or_equal(VCa, VCb) when is_map(VCa) andalso is_map(VCb) ->
+    happens_before(VCa, VCb) orelse VCa =:= VCb.
 
 comparable_vcs(VCs) ->
     %% A list of vector clocks is comparable iff all of them refer

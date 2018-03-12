@@ -149,8 +149,9 @@ handle_call({put_list, KVSEntries}, _From, KVS) ->
 
 
 handle_call({update_vc, Key, VC}, _From, KVS) ->
+    lab4kvs_debug:call({update_vc, Key, VC}),
     KVSValue = maps:get(Key, KVS),
-    true = lab4kvs_vcmanager:happens_before(KVSValue#kvsvalue.vector_clock, VC),
+    true = lab4kvs_vcmanager:happens_before_or_equal(KVSValue#kvsvalue.vector_clock, VC),
     NewKVSValue = KVSValue#kvsvalue{vector_clock=VC},
     {reply, ok, maps:put(Key, NewKVSValue, KVS)};
 

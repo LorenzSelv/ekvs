@@ -84,10 +84,10 @@ init(Req0=#{ method := <<"DELETE">> }, State) ->
 
 %%%%%%%%%%%%%%%% Internal functions %%%%%%%%%%%%%%%%
 
-get_kvs_query(Key, Payload, Req0) ->
-    case lab4kvs_kvsquery:exec(get, [Key, Payload]) of
-        {{ok, Value, Payload, Timestamp}, PartitionID} ->
-            Body = ?BODY_GET(Value, PartitionID, Payload, Timestamp),
+get_kvs_query(Key, RequestCP, Req0) ->
+    case lab4kvs_kvsquery:exec(get, [Key, RequestCP]) of
+        {{ok, Value, CP, Timestamp}, PartitionID} ->
+            Body = ?BODY_GET(Value, PartitionID, CP, Timestamp),
             cowboy_req:reply(200, ?HEADER, Body, Req0);
         {keyerror, _PartitionID} -> %% TODO reason
             cowboy_req:reply(404, ?HEADER, ?BODY_KEYERROR, Req0);
@@ -96,10 +96,10 @@ get_kvs_query(Key, Payload, Req0) ->
     end.
 
 
-put_kvs_query(Key, Value, Payload, Req0) ->
-    case lab4kvs_kvsquery:exec(put, [Key, Value, Payload]) of
-        {{ok, Payload, Timestamp}, PartitionID} ->
-            Body = ?BODY_PUT(PartitionID, Payload, Timestamp),
+put_kvs_query(Key, Value, RequestCP, Req0) ->
+    case lab4kvs_kvsquery:exec(put, [Key, Value, RequestCP]) of
+        {{ok, CP, Timestamp}, PartitionID} ->
+            Body = ?BODY_PUT(PartitionID, CP, Timestamp),
             cowboy_req:reply(200, ?HEADER, Body, Req0); 
         {badrpc, _PartitionID} ->
             node_down_reply(badrpc, Req0)

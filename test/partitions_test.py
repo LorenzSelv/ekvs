@@ -9,7 +9,7 @@ random.seed(100)
 import matplotlib.pyplot as plt
 import numpy as np
 
-VERBOSE = False
+VERBOSE = True
 
 DOCKER_RUN      = 'docker run -p %d:8080 --net=lab4net --ip=%s -e K=%d -e              "ip_port"="%s:8080" -e TOKENSPERPARTITION="%d" lab4erlang'
 DOCKER_RUN_INIT = 'docker run -p %d:8080 --net=lab4net --ip=%s -e K=%d -e VIEW="%s" -e "ip_port"="%s:8080" -e TOKENSPERPARTITION="%d" lab4erlang'
@@ -106,26 +106,29 @@ def inspect_nodes():
         snapshot.append(data['view'])
         snapshot.append(data['kvs'])
         snapshot.append('===============')
-    if VERBOSE: 
-        print('\n'.join(snapshot))
+    # if VERBOSE: 
+        # print('\n'.join(snapshot))
     return snapshot
 
 
-def get_key(node, key):
-    res = requests.get(node['url'] + 'kvs?key=%s' % key)
+def get_key(node, key, cp=''):
+    res = requests.get(node['url'] + 'kvs?key=%s&causal_payload=%s' % (key, cp))
     data = res.json()
     if VERBOSE:
         print('GET %s' % key)
         print(data)
-    return data['value']
+    return data['value'], data['causal_payload']
 
 
-def put_key(node, key, value):
-    res = requests.put(node['url'] + 'kvs', data={'key': key, 'value': value})
+def put_key(node, key, value, cp):
+    if VERBOSE:
+        print('PUT node=%s key=%s value=%s cp=%s' % (node['ipport'], key, value, cp))
+    res = requests.put(node['url'] + 'kvs', data={'key': key, 'value': value, 'causal_payload': cp})
+    print(res, res.status_code)
     data = res.json()
     if VERBOSE:
-        print('PUT %s %s' % (key, value))
         print(data)
+    return data['causal_payload']
 
 
 def del_key(node, key):
@@ -194,18 +197,19 @@ def rnodeidx():
     return random.randrange(len(NODES))
 
 
-def populate(num_key):
+def populate(num_key, cp=''):
     for i in range(num_key):
         key = 'key%d' % i
         val = 'val%d' % i
-        put_key(rnode(), key, val)
+        cp = put_key(rnode(), key, val, cp)
 
 
-def RYW(num_key):
+def RYW(num_key, cp=''):
     for i in range(num_key):
         key = 'key%d' % i
         val = 'val%d' % i
-        assert val == get_key(rnode(), key)
+        get_val, cp = get_key(rnode(), key, cp)
+        assert val == get_val
 
 
 def delete_keyrange(start, end):
@@ -246,7 +250,7 @@ def gen_view(num_nodes):
 
 def get_partition_id(node):
     res = requests.get(node['url'] + 'kvs/get_partition_id')
-    print(res.status_code)
+    print(res)
     data = res.json()
     if VERBOSE:
         print(data)
@@ -255,7 +259,7 @@ def get_partition_id(node):
 
 def get_partition_ids(node):
     res = requests.get(node['url'] + 'kvs/get_all_partition_ids')
-    print(res.status_code)
+    print(res)
     data = res.json()
     if VERBOSE:
         print(data)
@@ -264,7 +268,7 @@ def get_partition_ids(node):
 
 def get_partition_members(node, partition_id):
     res = requests.get(node['url'] + 'kvs/get_partition_members?partition_id=%d' % partition_id)
-    print(res.status_code)
+    print(res)
     data = res.json()
     if VERBOSE:
         print(data)
@@ -275,8 +279,8 @@ def test_kvsop():
     global TOKENS_PER_PARTITION
     global K
 
-    num_nodes = 5
-    num_keys  = 30
+    num_nodes = 3
+    num_keys  = 10 
 
     TOKENS_PER_PARTITION = 1
     K = 2
@@ -387,7 +391,7 @@ def test_partitions():
 
 if __name__ == '__main__':
     # test_partitions_info()
-    test_partitions()
-    # test_kvsop()
+    # test_partitions()
+    test_kvsop()
 
 
