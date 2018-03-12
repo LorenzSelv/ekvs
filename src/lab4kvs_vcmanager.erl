@@ -39,7 +39,7 @@ start_link() ->
 
 view_change(NewPartitions) ->
     %% TODO how to compare VC after view changes
-    gen_server:call(?MODULE, {update_vc, NewPartitions}).
+    gen_server:call(?MODULE, {view_change, NewPartitions}).
 
 
 merge_vcs(VCs) ->
@@ -73,8 +73,12 @@ init([]) ->
 
 
 handle_call({view_change, NewPartitions}, _From, #state{vector_clock=VC}) ->
-    %% TODO
-    {reply, ok, todo};
+    %% TODO pass nodes instead of partitions
+    %% TODO add call at the end of view_change
+    Nodes = lab4kvs_viewmanager:get_all_nodes(NewPartitions),
+    NewVCList = [{Node, maps:get(Node, VC, 0)} || Node <- Nodes],
+    NewVC = maps:from_list(NewVCList),
+    {reply, ok, #state{vector_clock=NewVC}};
 
 
 handle_call({new_event, CausalPayload}, _From, #state{vector_clock=VC}) ->

@@ -9,11 +9,11 @@
 -define(HEADER, #{<<"content-type">> => <<"application/json">>}).
 
 %% Response Bodies
--define(BODY_GET_ID(ID), jsx:encode(#{<<"message">> => <<"success">>, <<"partition_id">> => ID})).
+-define(BODY_GET_ID(ID), jsx:encode(#{<<"msg">> => <<"success">>, <<"partition_id">> => ID})).
 
--define(BODY_GET_IDS(IDs), jsx:encode(#{<<"message">> => <<"success">>, <<"partition_id_list">> => IDs})).
+-define(BODY_GET_IDS(IDs), jsx:encode(#{<<"msg">> => <<"success">>, <<"partition_id_list">> => IDs})).
 
--define(BODY_GET_MEMBERS(Members), jsx:encode(#{<<"message">> => <<"success">>, <<"partition_members">> => Members})).
+-define(BODY_GET_MEMBERS(Members), jsx:encode(#{<<"msg">> => <<"success">>, <<"partition_members">> => Members})).
 
 
 init(Req0, State) ->
@@ -38,5 +38,12 @@ handle_requested_info(get_partition_members, Req0=#{ method := <<"GET">> }) ->
     {_, PartitionIDStr} = lists:keyfind(<<"partition_id">>, 1, Data),
     PartitionID = binary_to_integer(PartitionIDStr),
     Members = lab4kvs_viewmanager:get_partition_members(PartitionID),
-    cowboy_req:reply(200, ?HEADER, ?BODY_GET_MEMBERS(Members), Req0).
+    MembersIPPort = [get_ip_port(Member) || Member <- Members],
+    cowboy_req:reply(200, ?HEADER, ?BODY_GET_MEMBERS(MembersIPPort), Req0).
+
+get_ip_port(Node) ->
+    %% Given the pair "node@ip" of a node,
+    %% return the ip:port pair of the node
+    [_, IP] = string:split(atom_to_list(Node), "@", all), 
+    list_to_binary(IP ++ ":8080").
 

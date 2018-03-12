@@ -1,3 +1,4 @@
+from multiprocessing import Pool
 import random
 import string
 from collections import Counter
@@ -6,10 +7,15 @@ import os
 import subprocess
 import requests as req
 import time
+## TODO
+import traceback
+import sys
 
 NODE_COUNTER = 2
-PRINT_HTTP_REQUESTS = False
-PRINT_HTTP_RESPONSES = False
+PRINT_HTTP_REQUESTS = True
+PRINT_HTTP_RESPONSES = True
+AVAILABILITY_THRESHOLD = 1 
+TB = 5
 
 HEADER = '\033[95m'
 OKBLUE = '\033[94m'
@@ -25,8 +31,14 @@ class Node:
         self.id = node_id
 
     def __repr__(self):
-        s = self.ip + " " + self.access_port + " " + self.id[:7]
-        return s
+        return self.ip
+
+def generate_ip_port():
+    global NODE_COUNTER
+    NODE_COUNTER += 1
+    ip = '10.0.0.' + str(NODE_COUNTER)
+    port = str(8080 + NODE_COUNTER)
+    return ip, port
 
 def generate_random_keys(n):
     alphabet = string.ascii_lowercase
@@ -38,93 +50,55 @@ def generate_random_keys(n):
         keys.append(key)
     return keys
 
-def send_get_request(hostname, node, key):
-    owner, value = None, None
+def send_get_request(hostname, node, key, causal_payload=''):
+    d = None
+    get_str = "http://" + hostname + ":" + node.access_port + "/kvs?key=" + key + "&causal_payload=" + causal_payload 
     try:
         if PRINT_HTTP_REQUESTS:
-            print "GET request: http://" + hostname + ":" + node.access_port + "/kvs?key=" + key
-        r = req.get("http://" + hostname + ":" + node.access_port + "/kvs?key=" + key)
+            print "Get request: " + get_str
+        start_time = time.time()
+        r = req.get(get_str)
+        end_time = time.time()
+        if end_time - start_time > AVAILABILITY_THRESHOLD:
+            print "THE SYSTEM IS NOT AVAILABLE: GET request took too long to execute : %s seconds" % (end_time - start_time)
         if PRINT_HTTP_RESPONSES:
             print "Response:", r.text, r.status_code
         d = r.json()
-       # print "http://" + hostname + ":" + node.access_port + "/kvs/" + key
-       # print d
-        owner = d['owner']
-        value = d['value']
+        for field in ['msg', 'value', 'partition_id', 'causal_payload', 'timestamp']:
+            if not d.has_key(field):
+                raise Exception("Field \"" + field + "\" is not present in response " + str(d))
     except Exception as e:
-        print "THE FOLLOWING GET REQUEST RESULTED IN AN ERROR: http://" + hostname + ":" + node.access_port + "/kvs/" + key
+        print "THE FOLLOWING GET REQUEST RESULTED IN AN ERROR: ",
+        print get_str
         print "Cannot retrieve key " + str(key) + " that should be present in the kvs"
-       # exit(1)
-    return owner, value
-    
-def send_put_request(hostname, node, key, value):
-    #print "sending put request " + "http://" + hostname + ":" + node.access_port + "/kvs/" + key
-    if PRINT_HTTP_REQUESTS:
-        print "PUT request:" + "http://" + hostname + ":" + node.access_port + "/kvs; key " + key +" and value " + str(value)
-    r = req.put("http://" + hostname + ":" + node.access_port + "/kvs", data={'key': key, 'value':value})
-    if PRINT_HTTP_RESPONSES:
-        print "Response:", r.text, r.status_code
-    d = r.json()
-    #print r.text
-    return d['owner'], d['msg']
-
-def add_keys(hostname, nodes, keys, value):
-    d = {}
-    for n in nodes:
-        d[n.ip + ":8080"] = 0
-    for key in keys:
-        owner, msg = send_put_request(hostname, nodes[random.randint(0, len(nodes) - 1)], key, value)
-        #print "Added key " + key  + " to node " + owner 
-        d[owner] += 1
+        print e
     return d
 
-def get_keys_distribution_old(hostname, nodes, keys):
-    d = {}
-    for n in nodes:
-        d[n.ip + ":8080"] = 0
-    for key in keys:
-        owner, val = send_get_request(hostname, nodes[random.randint(0, len(nodes) - 1)], key)
-        if owner is not None:
-            d[owner] += 1
-    return d
-
-def get_keys_distribution(hostname, nodes, keys):
-    d = {}
-    for n in nodes:
-        request_node = hostname + ":808" + str(n.ip.split(".")[3])
+def send_put_request(hostname, node, key, value, causal_payload=''):
+    d = None
+    put_str = "http://" + hostname + ":" + node.access_port + "/kvs"
+    data = {'value':value, 'causal_payload':causal_payload, 'key':key}
+    try:
         if PRINT_HTTP_REQUESTS:
-            print "GET request: http://" +request_node +"/kvs/get_number_of_keys" 
-        res = req.get("http://" +request_node +"/kvs/get_number_of_keys")
-        count = res.json()['count']
-        d[request_node] = count
-    return d
-        
-def add_node_to_kvs(hostname, cur_node, new_node):
-    if PRINT_HTTP_REQUESTS:
-        print "PUT request: " + "http://" + hostname + ":" + cur_node.access_port + "/kvs/view_update" + "; data field is " + 'ip_port=' + new_node.ip + ":8080 and type is add"
-    r = req.put("http://" + hostname + ":" + cur_node.access_port + "/kvs/view_update", 
-            data={'ip_port':new_node.ip + ":8080", "type":"add"})
-    if PRINT_HTTP_RESPONSES:
-        print "Response:", r.text, r.status_code
-    return r.status_code, r.json()['msg']
+            print "PUT request:" + put_str + ' data field:' + str(data)
+        start_time = time.time()
+        r = req.put(put_str, data=data)
+        end_time = time.time()
+        if end_time - start_time > AVAILABILITY_THRESHOLD:
+            print "THE SYSTEM IS NO AVAILABLE: PUT request took too long to execute : %s seconds" % (end_time - start_time)
+        if PRINT_HTTP_RESPONSES:
+            print "Response:", r.text, r.status_code
+        d = r.json()
+        for field in ['msg', 'partition_id', 'causal_payload', 'timestamp']:
+            if not d.has_key(field):
+                raise Exception("Field \"" + field + "\" is not present in response " + str(d))
+    except Exception as e:
+        print "THE FOLLOWING PUT REQUEST RESULTED IN AN ERROR: ",
+        print put_str + ' data field ' +  str(data)
+        print e
+    return d                
 
-def delete_node_from_kvs(hostname, cur_node, node_to_delete):
-    if PRINT_HTTP_REQUESTS:
-        print "PUT request: " + "http://" + hostname + ":" + cur_node.access_port + "/kvs/view_update" + "; data: " + 'ip_port=' + node_to_delete.ip + ":8080 and type is remove"
-    r = req.put("http://" + hostname + ":" + cur_node.access_port + "/kvs/view_update",
-            data={'ip_port':node_to_delete.ip + ":8080", "type":"remove"})
-    if PRINT_HTTP_RESPONSES:
-        print "Response:", r.text, r.status_code
-    return r.status_code, r.json()['msg']
-
-def generate_ip_port():
-    global NODE_COUNTER
-    NODE_COUNTER += 1
-    ip = '10.0.0.' + str(NODE_COUNTER)
-    port = str(8080 + NODE_COUNTER)
-    return ip, port
-
-def start_kvs(num_nodes, container_name, net='lab4net', sudo='sudo'):
+def start_kvs(num_nodes, container_name, K=2, net='net', sudo='sudo'):
     ip_ports = []
     for i in range(1, num_nodes+1):
         ip, port = generate_ip_port()
@@ -133,111 +107,159 @@ def start_kvs(num_nodes, container_name, net='lab4net', sudo='sudo'):
     nodes = []
     print "Starting nodes"
     for ip, port in ip_ports:
-        cmd_str = sudo + ' docker run -d -p ' + port + ":8080 --net=" + net + " --ip=" + ip + " -e VIEW=\"" + view + "\" -e ip_port=\"" + ip + ":8080" + "\" " + container_name
+        cmd_str = sudo + ' docker run -d -p ' + port + ":8080 --net=" + net + " -e K=" + str(K) + " --ip=" + ip + " -e VIEW=\"" + view + "\" -e ip_port=\"" + ip + ":8080" + "\" " + container_name
         print cmd_str
         node_id = subprocess.check_output(cmd_str, shell=True).rstrip('\n')
         nodes.append(Node(port, ip, node_id))
     time.sleep(5)
     return nodes
 
-def start_new_node(container_name, net='lab4net', sudo='sudo'):
-    ip, port = generate_ip_port()
-    cmd_str = sudo + ' docker run -d -p ' + port + ":8080 --net=" + net + " --ip=" + ip + " -e ip_port=\"" + ip + ":8080" + "\" " + container_name
-    print cmd_str
-    node_id = subprocess.check_output(cmd_str, shell=True).rstrip('\n')
-    time.sleep(5)
-    return Node(port, ip, node_id)
+def add_keys(hostname, nodes, keys, value):
+    d = {}
+    for key in keys:
+        resp_dict = send_put_request(hostname, nodes[random.randint(0, len(nodes) - 1)], key, value)
+        partition_id = resp_dict['partition_id']
+        if not d.has_key(partition_id):
+            d[partition_id] = 0
+        d[partition_id] += 1
+    return d   #returns number of keys in each partition.             
 
 def stop_all_nodes(sudo):                                           
-    print "\nStopping all nodes"
+    # running_containers = subprocess.check_output([sudo, 'docker',  'ps', '-q'])
+    # if len(running_containers):
+    print "Stopping all nodes"
     os.system(sudo + " docker kill $(" + sudo + " docker ps -q)") 
 
 def stop_node(node, sudo='sudo'):
     cmd_str = sudo + " docker kill %s" % node.id
     print cmd_str
     os.system(cmd_str)
+    time.sleep(0.5)
 
-def are_counts_balanced(counts, threshold):
-    is_balanced = True
-    for node, count in counts.iteritems():
-        if count < threshold:
-            is_balanced = False
-    return is_balanced
+def find_node(nodes, ip_port):
+    ip = ip_port.split(":")[0]
+    for n in nodes:
+        if n.ip == ip:
+            return n
+    return None
 
+def get_partition_id_for_key(node, key):
+    resp_dict = send_get_request(hostname, node, key, causal_payload='')
+    return resp_dict['partition_id']
+
+def get_all_partitions_ids(node):
+    get_str = "http://" + hostname + ":" + node.access_port + "/kvs/get_all_partition_ids"
+    try:
+        if PRINT_HTTP_REQUESTS:
+            print "Get request: " + get_str
+        r = req.get(get_str)
+        if PRINT_HTTP_RESPONSES:
+            print "Response:", r.text, r.status_code
+        d = r.json()
+        for field in ['msg', 'partition_id_list']:
+            if not d.has_key(field):
+                raise Exception("Field \"" + field + "\" is not present in response " + str(d))
+    except Exception as e:
+        print "THE FOLLOWING GET REQUEST RESULTED IN AN ERROR: ",
+        print get_str + ' data field ' ## +  str(data) TODO 
+        print e
+    return d['partition_id_list'] # returns the current partition ID list of the KVS
+
+def get_partition_id_for_node(node):
+    get_str = "http://" + hostname + ":" + node.access_port + "/kvs/get_partition_id"
+    try:
+        if PRINT_HTTP_REQUESTS:
+            print "Get request: " + get_str
+        r = req.get(get_str)
+        if PRINT_HTTP_RESPONSES:
+            print "Response:", r.text, r.status_code
+        d = r.json()
+        for field in ['msg', 'partition_id']:
+            if not d.has_key(field):
+                raise Exception("Field \"" + field + "\" is not present in response " + str(d))
+    except Exception as e:
+        print "THE FOLLOWING GET REQUEST RESULTED IN AN ERROR: ",
+        print get_str + ' data field ' ## +  str(data)
+        print e
+    return d['partition_id']    
+
+def get_partition_members(node, partition_id):
+    get_str = "http://" + hostname + ":" + node.access_port + "/kvs/get_partition_members?partition_id=" + str(partition_id)
+    d = None
+    try:
+        if PRINT_HTTP_REQUESTS:
+            print "Get request: " + get_str ## + " data " + str(data)
+        r = req.get(get_str)
+        if PRINT_HTTP_RESPONSES:
+            print "Response:", r.text, r.status_code
+        d = r.json()
+        for field in ['msg', 'partition_members']:
+            if not d.has_key(field):
+                raise Exception("Field \"" + field + "\" is not present in response " + str(d))
+    except Exception as e:
+        print "THE FOLLOWING GET REQUEST RESULTED IN AN ERROR: ",
+        print get_str
+        print e
+    return d['partition_members']    
 
 if __name__ == "__main__":
-    # Name of you docker image
     container_name = 'lab4erlang'
-    # If you can run docker without using sudo, then make the sudo variable empty string
-    sudo = ''
-    # For windows users hostname should be set to the virtual box ip address
     hostname = 'localhost'
-    # Number of random keys to generate
-    num_keys = 2000
-    # If each node contains at least 100 keys then it is considered balanced.
-    threshold = 100
+    network = 'lab4net'
+    sudo = ''
+    tests_to_run = [1] #  
 
-    num_nodes = 5
-    print OKBLUE + "Starting a KVS with " + str(num_nodes) + " nodes"+ ENDC
-    kvs_nodes = start_kvs(num_nodes, container_name, net='lab4net', sudo=sudo)
-    #print kvs_nodes
-    keys = generate_random_keys(num_keys)
-    print OKBLUE + "\nAdding " + str(num_keys) + " randomly generated keys "+ ENDC
-    counts = add_keys(hostname, kvs_nodes, keys, value = 1)
-    if sum([int(val) for _, val in counts.iteritems()]) != num_keys:
-        print FAIL + "SOME KEYS WERE NOT ADDDED SUCCESSFULY" + ENDC
+    if 1 in tests_to_run:
+        try: # Test 1
+            test_description = """Test 1: Basic functionality for obtaining information about partitions; tests the following GET requests get_all_partitions_ids, get_partition_memebrs and get_partition_id."""
+            print HEADER + "" + test_description  + ENDC
+            nodes = start_kvs(4, container_name, K=2, net=network, sudo=sudo)
+            keys = generate_random_keys(60)
+            dist = add_keys(hostname, nodes, keys, 1)
+            partition_id_list =  get_all_partitions_ids(nodes[0])
+            if len(partition_id_list) != 2:
+                raise Exception("ERROR: the number of partitions should be 2")
+            for part_id in partition_id_list:
+                if part_id not in dist:
+                    raise Exception("ERROR: No keys are added to the partition %s" % part_id)
+            
+            print "Obtaining partition id for key ", keys[0]
+            partition_id_for_key = get_partition_id_for_key(nodes[0], keys[0])
+            print "Obtaining partition members for partition ", partition_id_for_key
+            members = get_partition_members(nodes[0], partition_id_for_key)
+            if len(members) != 2:
+                ## TODO %d instead of %s
+                raise Exception("ERROR: the size of a partition %d should be 2, but it is %d" % (partition_id_for_key, len(members)))
+            
+            part_nodes = []
+            for ip_port in members:
+                n = find_node(nodes, ip_port)
+                if n is None:
+                    raise Exception("ERROR: mismatch in the node ids (likely bug in the test script)")
+                part_nodes.append(n)
+            print "Asking nodes directly about their partition id. Information should be consistent"
+            for i in range(len(part_nodes)):
+                part_id = get_partition_id_for_node(part_nodes[i])
+                if part_id != partition_id_for_key:
+                    raise Exception("ERRR: inconsistent information about partition ids!")
+            print "Ok, killing all the nodes in the partition ", partition_id_for_key
+            print "Verifying that we cannot access the key using other partitions"
+            for node in part_nodes:
+                stop_node(node, sudo=sudo)
+            other_nodes = [n for n in nodes if n not in part_nodes]
 
-
-    print OKBLUE + "\nTesting whether nodes are balanced"+ ENDC
-    counts = get_keys_distribution(hostname, kvs_nodes, keys)
-
-    if not are_counts_balanced(counts, threshold):
-        print FAIL + "FAIL: KEYS ARE IMBALANCED" + ENDC
-        print counts
-    else:
-        print OKGREEN + "OK: KEYS ARE BALANCED" + ENDC
-        print counts
-
-    print OKBLUE + "\nAdding a new node"+ ENDC
-    new_node = start_new_node(container_name, net='lab4net', sudo=sudo)
-    kvs_nodes.append(new_node)
-
-    print OKBLUE + "\nSending a view update request"+ ENDC
-    t1 = time.time()
-    status_code, msg = add_node_to_kvs(hostname, kvs_nodes[0], new_node)
-    t2 = time.time()
-    print HEADER + "TIME TAKEN FOR VIEW UPDATE: " + str(t2-t1) + " seconds"   
-
-    print OKBLUE + "\nTesting whether nodes are balanced"+ ENDC
-    counts = get_keys_distribution(hostname, kvs_nodes, keys)
-    if not are_counts_balanced(counts, threshold):
-        print FAIL + "FAIL: KEYS ARE IMBALANCED AFTER ADDITION OF A NODE" + ENDC
-        print counts
-    else:
-        print OKGREEN + "OK: KEYS ARE BALANCED AFTER ADDITION OF A NODE" + ENDC
-        print counts
-    if sum([int(val) for _, val in counts.iteritems()]) != num_keys:
-        print FAIL + "SOME KEYS WERE LOST AFTER AN ADDITION OF A NODE" + ENDC
-    else:    
-        print OKGREEN + "OK: NO KEY LOSS AFTER AN ADDITION OF A NODE" + ENDC
-
-    print OKBLUE + "\nDeleting a node"+ ENDC
-    delete_node_from_kvs(hostname, kvs_nodes[0], kvs_nodes[1])
-    stop_node(kvs_nodes[1], sudo=sudo)
-    del kvs_nodes[1]
-    counts = add_keys(hostname, kvs_nodes, keys, value = 1)
-
-
-    print OKBLUE + "\nTesting whether nodes are balanced after removing a node"+ ENDC
-    counts = get_keys_distribution(hostname, kvs_nodes, keys)
-    if not are_counts_balanced(counts, threshold):
-        print FAIL + "FAIL: KEYS ARE IMBALANCED AFTER REMOVING A NODE" + ENDC
-        print counts
-    else:
-        print OKGREEN + "OK: KEYS ARE BALANCED AFTER REMOVING A NODE" + ENDC
-        print counts
-    if sum([int(val) for _, val in counts.iteritems()]) != num_keys:
-        print FAIL + "SOME KEYS WERE LOST AFTER DELETING A NODE" + ENDC
-    else:    
-        print OKGREEN + "OK: NO KEY LOSS AFTER REMOVING A NODE" + ENDC
-    stop_all_nodes(sudo)
+            key = keys[0]
+            get_str = "http://" + hostname + ":" + other_nodes[0].access_port + "/kvs?key=" + key + "&causal_payload=" + "" 
+            if PRINT_HTTP_REQUESTS:
+                print "Get request: " + get_str
+            r = req.get(get_str)
+            if PRINT_HTTP_RESPONSES:
+                print "Response:", r.text, r.status_code
+            if r.status_code in [200, 201, '200', '201']:
+                raise Exception("ERROR: A KEY %s SHOULD NOT BE AVAILABLE AS ITS PARTITION IS DOWN!!!" % keys[0])
+            print "OK, functionality for obtaining information about partitions looks good!"
+        except Exception as e:
+            print "Exception in test 3"
+            print e
+            traceback.print_exc(file=sys.stdout)
+        stop_all_nodes(sudo)

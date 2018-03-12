@@ -14,8 +14,10 @@
 -export([get_key_partition_id/1]).
 -export([get_all_nodes/0]).
 -export([view_change/2]).
-
 -export([dump/0]).
+
+%% Util functions
+-export([get_all_nodes/1]).
 
 -export([test_initstate/0]).
 
