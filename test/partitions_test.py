@@ -244,12 +244,81 @@ def gen_view(num_nodes):
     return ','.join("10.0.0.%d:8080" % (20+i) for i in range(num_nodes))
 
 
+def get_partition_id(node):
+    res = requests.get(node['url'] + 'kvs/get_partition_id')
+    print(res.status_code)
+    data = res.json()
+    if VERBOSE:
+        print(data)
+    return data['partition_id']
+
+
 def get_partition_ids(node):
     res = requests.get(node['url'] + 'kvs/get_all_partition_ids')
+    print(res.status_code)
     data = res.json()
     if VERBOSE:
         print(data)
     return data['partition_id_list']
+
+
+def get_partition_members(node, partition_id):
+    res = requests.get(node['url'] + 'kvs/get_partition_members?partition_id=%d' % partition_id)
+    print(res.status_code)
+    data = res.json()
+    if VERBOSE:
+        print(data)
+    return data['partition_members']
+
+
+def test_kvsop():
+    global TOKENS_PER_PARTITION
+    global K
+
+    num_nodes = 5
+    num_keys  = 30
+
+    TOKENS_PER_PARTITION = 1
+    K = 2
+
+    init_cluster(gen_view(num_nodes))
+
+    snapshot_to_file('0init')
+
+    populate(num_keys)
+    # assert ???num_keys == get_totnumkey()
+    RYW(num_keys)
+
+    snapshot_to_file('1populated')
+     
+    kill_nodes()
+
+
+def test_partitions_info():
+    global TOKENS_PER_PARTITION
+    global K
+
+    num_nodes = 5
+    num_keys  = 30
+
+    TOKENS_PER_PARTITION = 1
+    K = 2
+
+    init_cluster(gen_view(num_nodes))
+    snapshot_to_file('0init')
+    
+    ids = get_partition_ids(NODES[0])
+    print('ids', ids)
+
+    for id_ in ids:
+        print('part %d' % id_, get_partition_members(rnode(), id_))
+        print('-'*10)
+
+    for i, node in enumerate(NODES):
+        print('node%d' % i, get_partition_id(node))
+        print('-'*10)
+
+    kill_nodes()
 
 
 def test_partitions():
@@ -317,6 +386,8 @@ def test_partitions():
 
 
 if __name__ == '__main__':
+    # test_partitions_info()
     test_partitions()
+    # test_kvsop()
 
 

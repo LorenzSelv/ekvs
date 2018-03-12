@@ -35,7 +35,8 @@ handle_requested_info(get_all_partition_ids, Req0=#{ method := <<"GET">> }) ->
 
 handle_requested_info(get_partition_members, Req0=#{ method := <<"GET">> }) ->
     Data = cowboy_req:parse_qs(Req0),
-    {_, PartitionID} = lists:keyfind(<<"partition_id">>, 1, Data),
+    {_, PartitionIDStr} = lists:keyfind(<<"partition_id">>, 1, Data),
+    PartitionID = binary_to_integer(PartitionIDStr),
     Members = lab4kvs_viewmanager:get_partition_members(PartitionID),
     cowboy_req:reply(200, ?HEADER, ?BODY_GET_MEMBERS(Members), Req0).
 

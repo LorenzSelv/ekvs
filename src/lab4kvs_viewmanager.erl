@@ -79,11 +79,11 @@ get_all_nodes() ->
     %% Return a list of all nodes in the partitions 
     gen_server:call(whereis(view_manager), all_nodes).
 
-view_change(Type, IPPort) when Type =:= <<"add">> orelse Type =:= <<"remove">> ->
+view_change(Type, IPPort) when Type =:= add orelse Type =:= remove ->
     %% Broadcast message and redistribute keys.
     %% On add, return the partition id of the new node
     Node = lab4kvs_viewutils:get_node_name(binary_to_list(IPPort)),
-    gen_server:call(whereis(view_manager), {view_change, binary_to_atom(Type, latin1), Node}).
+    gen_server:call(whereis(view_manager), {view_change, Type, Node}).
 
 
 dump() ->
@@ -154,8 +154,8 @@ handle_call({view_change, Type, NodeChanged}, _From, View = #view{partitions=Par
     Reply = case Type of
                 add ->  %% On add, it should return the partition 
                         %% id of the new node
-                    lab4kvs_vcmanager:get_partition_id(NodeChanged, 
-                                                      NewView#view.partitions);
+                    lab4kvs_viewutils:get_partition_id(NodeChanged, 
+                                                       NewView#view.partitions);
                 remove ->
                     ok
             end,

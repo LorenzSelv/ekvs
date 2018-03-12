@@ -33,7 +33,7 @@
 
 start_link() ->
     %% TODO register server globally
-    gen_server:start_link({local, ?MODULE}, [], []).
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 
 view_change(NewPartitions) ->

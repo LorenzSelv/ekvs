@@ -40,14 +40,14 @@ init(Req0=#{ method := <<"PUT">> }, State) ->
 
 %%%%%%%%%%%%%%%% Internal functions %%%%%%%%%%%%%%%%
 
-view_change(add, IPPort, Req0) ->
+view_change(<<"add">>, IPPort, Req0) ->
     PartitionID = lab4kvs_viewmanager:view_change(add, IPPort),
     PartitionCount = lab4kvs_viewmanager:get_num_partitions(),
     Body = ?BODY_ADD(PartitionID, PartitionCount), 
     cowboy_req:reply(200, ?HEADER, Body, Req0);
 
 
-view_change(remove, IPPort, Req0) ->
+view_change(<<"remove">>, IPPort, Req0) ->
     lab4kvs_viewmanager:view_change(remove, IPPort),
     PartitionCount = lab4kvs_viewmanager:get_num_partitions(),
     Body = ?BODY_REMOVE(PartitionCount),
