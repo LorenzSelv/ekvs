@@ -10,6 +10,7 @@
 -export([put/3]).
 -export([put/2]).
 -export([put_list/1]).
+-export([update_vc/2]).
 -export([delete/1]).
 -export([delete_list/1]).
 -export([get_all_entries/0]).
@@ -50,6 +51,10 @@ put(Key, KVSValue) when is_record(KVSValue, kvsvalue) ->
 
 put_list(KVSEntries) when is_list(KVSEntries) ->
     gen_server:call(?MODULE, {put_list, KVSEntries}).
+
+
+update_vc(Key, VC) ->
+    gen_server:call(?MODULE, {update_vc, Key, VC}).
 
 
 delete(Key) ->
@@ -104,6 +109,8 @@ handle_call({get, Key}, _From, KVS) ->
 handle_call({put, Key, Value, CausalPayload}, _From, KVS) ->
     NewVC = lab4kvs_vcmanager:new_event(CausalPayload),
     KVSValue = prepare_kvsvalue(Key, Value, NewVC),
+    %% Update node vector clock
+    lab4kvs_vcmanager:update_vc(NewVC),
     %% TODO no need to resolve
     %% ResKVSValue = resolve_put(Key, KVSValue, KVS),
     %% ResVC = ResKVSValue#kvsvalue.vector_clock,
@@ -130,12 +137,6 @@ handle_call({put_kvsvalue, Key, KVSValue}, _From, KVS) when is_record(KVSValue, 
     {reply, Reply, maps:put(Key, ResKVSValue, KVS)};
 
 
-%% TODO delete is not a delete, is a put deleted
-handle_call({delete, Key}, _From, KVS) ->
-    Reply = {deleted, maps:is_key(Key, KVS)},
-    {reply, Reply, maps:remove(Key, KVS)};
-
-
 handle_call({put_list, []}, _From, KVS) -> {reply, ok, KVS};
 
 handle_call({put_list, KVSEntries}, _From, KVS) ->
@@ -145,6 +146,18 @@ handle_call({put_list, KVSEntries}, _From, KVS) ->
     NewKVS = lists:foldl(Put, KVS, KVSEntries),
     {reply, ok, NewKVS};
 
+
+handle_call({update_vc, Key, VC}, _From, KVS) ->
+    KVSValue = maps:get(Key, KVS),
+    true = lab4kvs_vcmanager:happens_before(KVSValue#kvsvalue.vector_clock, VC),
+    NewKVSValue = KVSValue#kvsvalue{vector_clock=VC},
+    {reply, ok, maps:put(Key, NewKVSValue, KVS)};
+
+
+%% TODO delete is not a delete, is a put 'deleted'
+handle_call({delete, Key}, _From, KVS) ->
+    Reply = {deleted, maps:is_key(Key, KVS)},
+    {reply, Reply, maps:remove(Key, KVS)};
 
 handle_call({delete_list, []}, _From, KVS) -> {reply, ok, KVS};
 

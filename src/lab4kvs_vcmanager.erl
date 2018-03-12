@@ -11,7 +11,8 @@
 -export([view_change/1]).
 -export([merge_vcs/1]).
 -export([new_event/1]).
--export([broadcast_vc_to/1]).
+-export([update_vc/1]).
+%% -export([broadcast_vc_to/1]).
 
 -export([get_timestamp/0]).
 -export([cp_to_vc/1]).
@@ -52,10 +53,14 @@ new_event(CausalPayload) ->
     gen_server:call(?MODULE, {new_event, CausalPayload}).
 
 
-broadcast_vc_to(Nodes) ->
+update_vc(VC) ->
+    gen_server:call(?MODULE, {update_vc, VC}).
+
+%% TODO remove
+%% broadcast_vc_to(Nodes) ->
     %% Broadcast the vector clock of the current node to all
     %% the specified nodes
-    gen_server:call(?MODULE, {broadcasted_vc, Nodes}).
+    %% gen_server:call(?MODULE, {broadcasted_vc, Nodes}).
 
 
 %%%%% Server Callbacks %%%%% 
@@ -86,9 +91,14 @@ handle_call({merge_vcs, VCs}, _From, #state{vector_clock=VC}) ->
     {reply, MergedVC, #state{vector_clock=MergedVC}};
 
 
-handle_call({broadcast_vc_to, _Nodes}, _From, State=#state{vector_clock=VC}) ->
-    %% TODO
-    {reply, ok, State}.
+handle_call({update_vc, NewVC}, _From, #state{vector_clock=VC}) ->
+    MergedVC = get_merged_vcs([VC, NewVC]),
+    {reply, ok, #state{vector_clock=MergedVC}}.
+
+
+%% handle_call({broadcast_vc_to, _Nodes}, _From, State=#state{vector_clock=VC}) ->
+    %% %% TODO
+    %% {reply, ok, State}.
 
 %% TODO handle receive broadcasted_vc
 

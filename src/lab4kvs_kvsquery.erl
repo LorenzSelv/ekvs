@@ -125,8 +125,7 @@ forward_kvs_query_to([Nodes], put, [Key, Value, CausalPayload]) ->
             
             %% Broadcast MergedVC to all connected nodes
             UpNodes = [Node || {Node, _} <- UpNodeResultList],
-            %% TODO pass also the key so that the vector clock of the can be updated
-            lab4kvs_vcmanager:broadcast_vc_to(UpNodes),
+            broadcast_vector_clock_to(UpNodes, Key, MergedVC),
 
             %% All connected nodes have an up-to-date vector clock
             %% Async RPC call until success to all disconnected nodes
@@ -137,6 +136,24 @@ forward_kvs_query_to([Nodes], put, [Key, Value, CausalPayload]) ->
             lists:map(AsyncPut, DownNodes),
             {ok, MergedCP, KVSValue#kvsvalue.timestamp}
     end.
+
+
+broadcast_vector_clock_to(UpNodes, Key, VC) ->
+    %% Update the vector clock associated with the specified key in the remote KVS
+    %% Update the vector clock of the remote node 
+    UpdateVC = fun(Node) ->
+                    ok = rpc_call_with_timeout(Node,
+                                               lab4kvs_kvstore,
+                                               update_vc,
+                                               [Key, VC],
+                                               ?FORWARD_TIMEOUT),
+                    ok = rpc_call_with_timeout(Node, 
+                                               lab4kvs_vcmanager,
+                                               update_vc,
+                                               [VC],
+                                               ?FORWARD_TIMEOUT)
+               end,
+    lists:map(UpdateVC, UpNodes).
 
 
 local_call(Module, Func, Args) ->
