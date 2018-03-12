@@ -6,7 +6,7 @@
 
 %% API interface
 -export([start_link/0]).
--export([get/1]).
+-export([get/2]).
 -export([put/3]).
 -export([put/2]).
 -export([put_list/1]).
@@ -33,10 +33,10 @@ start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 
-get(Key) ->
+get(Key, CausalPayload) ->
     %% Return {ok, Value, CausalPayload, Timestamp};
     %%     or keyerror
-    gen_server:call(?MODULE, {get, Key}).
+    gen_server:call(?MODULE, {get, Key, CausalPayload}).
 
 
 put(Key, Value, CausalPayload) ->
@@ -92,13 +92,14 @@ init(_Args) ->
     {ok, maps:new()}.
 
 
-handle_call({get, Key}, _From, KVS) ->
+handle_call({get, Key, RequestCP}, _From, KVS) ->
     Reply = case maps:find(Key, KVS) of
                 %% TODO handle deleted keys
                 %% {ok, #kvsvalue{value=deleted}} -> keyerror;
                 {ok, #kvsvalue{value=Value,
                                vector_clock=VC,
                                timestamp=Timestamp}} ->
+                    %% TODO do not ignore request CP
                     CausalPayload = lab4kvs_vcmanager:vc_to_cp(VC),
                     {ok, Value, CausalPayload, Timestamp};
                 error -> keyerror

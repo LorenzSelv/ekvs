@@ -28,7 +28,7 @@ exec(Func, Args) ->
     {Result, KeyPartitionID}.
 
 
-run_kvs_query_at(Nodes, get, [Key]) ->
+run_kvs_query_at(Nodes, get, [Key, CP]) ->
     %% A GET request is guaranteed to return the most up-to-date value
     %% present in the connected nodes of the partition.
     %% Thus, the first result received from one of the node of the partition
@@ -47,12 +47,12 @@ run_kvs_query_at(Nodes, get, [Key]) ->
     %%
     case lists:member(node(), Nodes) of
         true  ->
-            local_call(lab4kvs_kvstore, get, [Key]);
+            local_call(lab4kvs_kvstore, get, [Key, CP]);
         false ->
-            forward_kvs_query_to(Nodes, get, [Key])
+            forward_kvs_query_to(Nodes, get, [Key, CP])
     end;
 
-run_kvs_query_at(Nodes, put, [Key, Value, CausalPayload]) ->
+run_kvs_query_at(Nodes, put, [Key, Value, CP]) ->
     %% A PUT request has to enforce the guarantee described above for the GET
     %% request. To achieve this goal, each node that receives a put request
     %% has to broadcast the request to all other nodes in the partition.
@@ -78,9 +78,9 @@ run_kvs_query_at(Nodes, put, [Key, Value, CausalPayload]) ->
     %%
     case lists:member(node(), Nodes) of
         true  ->
-            ResLocal = local_call(lab4kvs_kvstore, put, [Key, Value, CausalPayload]),
+            ResLocal = local_call(lab4kvs_kvstore, put, [Key, Value, CP]),
             %% Forward put request to other nodes in the partition
-            ResForward  = forward_kvs_query_to(Nodes -- [node()], put, [Key, Value, CausalPayload]),
+            ResForward  = forward_kvs_query_to(Nodes -- [node()], put, [Key, Value, CP]),
             case ResForward of
                 all_disconnected ->
                     ResLocal;
@@ -88,26 +88,27 @@ run_kvs_query_at(Nodes, put, [Key, Value, CausalPayload]) ->
                     ResForward
             end;
         false ->
-            forward_kvs_query_to(Nodes, put, [Key, Value, CausalPayload])
+            forward_kvs_query_to(Nodes, put, [Key, Value, CP])
     end.
 
 
 forward_kvs_query_to([], get, _) -> all_disconnected;
-forward_kvs_query_to([Node|Nodes], get, [Key]) -> 
-    case rpc_call_with_timeout(Node, lab4kvs_kvstore, get, [Key], ?FORWARD_TIMEOUT) of
+forward_kvs_query_to([Node|Nodes], get, [Key, CP]) -> 
+    case rpc_call_with_timeout(Node, 
+                               lab4kvs_kvstore, get, [Key, CP], 
+                               ?FORWARD_TIMEOUT) of
         {ok, Res} ->  %% Res = {ok, Value, CausalPayload, Timestamp} | keyerror
             Res;
         {badrpc, timeout} ->
-            forward_kvs_query_to(Nodes, get, [Key])
+            forward_kvs_query_to(Nodes, get, [Key, CP])
     end;
 
 
 
-forward_kvs_query_to([Nodes], put, [Key, Value, CausalPayload]) -> 
+forward_kvs_query_to([Nodes], put, [Key, Value, CP]) -> 
     Put = fun(Node) -> rpc_call_with_timeout(Node, 
-                                             lab4kvs_kvstore, 
-                                             put, 
-                                             [Key, Value, CausalPayload], 
+                                             lab4kvs_kvstore, put, 
+                                             [Key, Value, CP],
                                              ?FORWARD_TIMEOUT) end,
     Results = lists:map(Put, Nodes),
     %% Results is a list of {ok, Result} | {badrpc, timeout} 
@@ -117,7 +118,7 @@ forward_kvs_query_to([Nodes], put, [Key, Value, CausalPayload]) ->
     case length(UpNodeResultList) of
         0 ->  %% All nodes are disconnected
             all_disconnected;
-        _ ->  %% Each UpNodeResult is {node, {ok, CausalPayload, Timestamp}}
+        _ ->  %% Each UpNodeResult is {node, {ok, CP, Timestamp}}
             VCs = [lab4kvs_vcmanager:cp_to_vc(CP) || 
                    {_, {ok, CP, _}} <- UpNodeResultList],
             MergedVC = lab4kvs_vcmanager:merge_vcs(VCs),
@@ -130,7 +131,7 @@ forward_kvs_query_to([Nodes], put, [Key, Value, CausalPayload]) ->
             %% All connected nodes have an up-to-date vector clock
             %% Async RPC call until success to all disconnected nodes
             DownNodes = Nodes -- UpNodes, 
-            KVSValue  = lab4kvs_kvstore:prepare_kvsvalue(Key, Value, CausalPayload),
+            KVSValue  = lab4kvs_kvstore:prepare_kvsvalue(Key, Value, CP),
             AsyncPut  = fun(Node) ->
                            async_rpc_call_until_success(Node, lab4kvs_kvstore, put, [Key, KVSValue]) end,
             lists:map(AsyncPut, DownNodes),
