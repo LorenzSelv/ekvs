@@ -80,7 +80,8 @@ run_kvs_query_at(Nodes, put, [Key, Value, CP]) ->
         true  ->
             ResLocal = local_call(lab4kvs_kvstore, put, [Key, Value, CP]),
             %% Forward put request to other nodes in the partition
-            ResForward  = forward_kvs_query_to(Nodes -- [node()], put, [Key, Value, CP]),
+            NewCP = lab4kvs_vcmanager:get_cp(), 
+            ResForward  = forward_kvs_query_to(Nodes -- [node()], put, [Key, Value, NewCP]),
             case ResForward of
                 all_disconnected ->
                     ResLocal;
@@ -117,31 +118,37 @@ forward_kvs_query_to(Nodes, put, [Key, Value, CP]) ->
     %% TODO to test with disconnected nodes
     UpNodeResultList = [{Node, Result} || 
                         {Node, {ok, Result}} <- lists:zip(Nodes, Results)],
-    case length(UpNodeResultList) of
-        0 ->  %% All nodes are disconnected
-            all_disconnected;
-        _ ->  %% Each UpNodeResult is {node, {ok, CP, Timestamp}}
-            io:format("UpNodesResults ~p~n", [UpNodeResultList]),
-            VCs = [lab4kvs_vcmanager:cp_to_vc(ResCP) || 
-                   {_, {ok, ResCP, _}} <- UpNodeResultList],
-            io:format("VCs = ~p~n", [VCs]),
-            MergedVC = lab4kvs_vcmanager:merge_vcs(VCs),
-            MergedCP = lab4kvs_vcmanager:vc_to_cp(MergedVC),
-            
-            io:format("MergedVC = ~p~n", [MergedVC]),
-            %% Broadcast MergedVC to all connected nodes
-            UpNodes = [Node || {Node, _} <- UpNodeResultList],
-            broadcast_vector_clock_to(UpNodes, Key, MergedVC),
+    UpNodes = [Node || {Node, _} <- UpNodeResultList],
 
-            %% All connected nodes have an up-to-date vector clock
-            %% Async RPC call until success to all disconnected nodes
-            DownNodes = Nodes -- UpNodes, 
-            KVSValue  = lab4kvs_kvstore:prepare_kvsvalue(Key, Value, CP),
-            AsyncPut  = fun(Node) ->
-                           async_rpc_call_until_success(Node, lab4kvs_kvstore, put, [Key, KVSValue]) end,
-            lists:map(AsyncPut, DownNodes),
-            {ok, MergedCP, KVSValue#kvsvalue.timestamp}
-    end.
+    {NewCP, Res} = case length(UpNodes) of
+                    0 ->  %% All nodes are disconnected
+                        {CP, all_disconnected};
+                    _ ->  %% Each UpNodeResult is {node, {ok, CP, Timestamp}}
+                        io:format("UpNodesResults ~p~n", [UpNodeResultList]),
+                        VCs = [lab4kvs_vcmanager:cp_to_vc(ResCP) || 
+                               {_, {ok, ResCP, _}} <- UpNodeResultList],
+                        io:format("VCs = ~p~n", [VCs]),
+                        MergedVC = lab4kvs_vcmanager:merge_vcs(VCs),
+                        MergedCP = lab4kvs_vcmanager:vc_to_cp(MergedVC),
+                        
+                        io:format("MergedVC = ~p~n", [MergedVC]),
+                        %% Broadcast MergedVC to all connected nodes
+                        broadcast_vector_clock_to(UpNodes, Key, MergedVC),
+
+                        R = {ok, MergedCP, lab4kvs_vcmanager:get_timestamp()},  
+                        {MergedCP, R}
+    end,
+    %% All connected nodes have an up-to-date vector clock
+    %% Async RPC call until success to all disconnected nodes
+    DownNodes = Nodes -- UpNodes, 
+    KVSValue  = lab4kvs_kvstore:prepare_kvsvalue(Key, Value, NewCP),
+    AsyncPut  = fun(Node) ->
+                   %% TODO put kvsvalue does not call 'new_event'
+                   async_rpc_call_until_success(Node, lab4kvs_kvstore, put, [Key, KVSValue]) end,
+    lists:map(AsyncPut, DownNodes),
+
+    io:format("ASYNC PUT ~p to DOWN NODES ~p~n", [KVSValue, DownNodes]),
+    Res.
 
 
 broadcast_vector_clock_to(UpNodes, Key, VC) ->
@@ -149,11 +156,11 @@ broadcast_vector_clock_to(UpNodes, Key, VC) ->
     %% Update the vector clock of the remote node 
     lab4kvs_debug:call({broadcast_vc_to, UpNodes, Key, VC}),
     UpdateVC = fun(Node) ->
-                    rpc_call_with_timeout(Node,
-                                          lab4kvs_kvstore,
-                                          update_vc,
-                                          [Key, VC],
-                                          ?FORWARD_TIMEOUT),
+                    %% rpc_call_with_timeout(Node,
+                                          %% lab4kvs_kvstore,
+                                          %% update_vc,
+                                          %% [Key, VC],
+                                          %% ?FORWARD_TIMEOUT),
                     rpc_call_with_timeout(Node, 
                                           lab4kvs_vcmanager,
                                           update_vc,
@@ -177,9 +184,11 @@ async_rpc_call_until_success(Node, Module, Func, Args) ->
     %% this function returns immediately after having spawned the process.
     %%
     LoopRPC = fun Loop() ->
-                  case rpc_call_with_timeout(Node, Module, Func, Args, 2) of 
+                  case rpc_call_with_timeout(Node, Module, Func, Args, ?FORWARD_TIMEOUT) of 
                       {ok, _Result} -> ok;
-                      {badrpc, timeout} -> Loop()
+                      {badrpc, timeout} -> 
+                          io:format("Timeout, trying again..~n"),
+                          Loop()
                   end
               end,
     _Pid = spawn(LoopRPC).
@@ -196,7 +205,11 @@ rpc_call_with_timeout(Node, Module, Func, Args, Timeout) ->
                         Res = rpc:call(Node, Module, Func, Args, Timeout),
                         Pid ! {self(), ok, Res} end),
     receive
-        {SpawnPid, ok, Res} -> {ok, Res}
+        {SpawnPid, ok, Res} -> 
+            {ok, Res}
     after
-        Timeout -> {badrpc, timeout}
+        Timeout -> 
+            %% Kill the rpc call
+            exit(SpawnPid, kill), 
+            {badrpc, timeout}
     end.

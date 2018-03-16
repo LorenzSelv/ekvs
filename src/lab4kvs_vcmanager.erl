@@ -12,6 +12,9 @@
 -export([merge_vcs/1]).
 -export([new_event/1]).
 -export([update_vc/1]).
+-export([get_vc/0]).
+-export([get_cp/0]).
+
 %% -export([broadcast_vc_to/1]).
 
 -export([get_timestamp/0]).
@@ -57,6 +60,12 @@ new_event(CausalPayload) ->
 update_vc(VC) ->
     gen_server:call(?MODULE, {update_vc, VC}).
 
+get_vc() ->
+    gen_server:call(?MODULE, get_vc).
+
+get_cp() ->
+    gen_server:call(?MODULE, get_cp).
+
 %% TODO remove
 %% broadcast_vc_to(Nodes) ->
     %% Broadcast the vector clock of the current node to all
@@ -82,10 +91,12 @@ handle_call({view_change, NewPartitions}, _From, #state{vector_clock=VC}) ->
 
 
 handle_call({new_event, CausalPayload}, _From, #state{vector_clock=VC}) ->
+    lab4kvs_debug:call({new_event,CausalPayload}),
     RequestVC = cp_to_vc(CausalPayload),
     MergedVC  = get_merged_vcs([RequestVC, VC]),
     Clock = maps:get(node(), MergedVC),
     NewVC = maps:put(node(), Clock+1, MergedVC),
+    lab4kvs_debug:return({new_event,NewVC}),
     {reply, NewVC, #state{vector_clock=NewVC}};
 
 
@@ -96,8 +107,15 @@ handle_call({merge_vcs, VCs}, _From, #state{vector_clock=VC}) ->
 
 handle_call({update_vc, NewVC}, _From, #state{vector_clock=VC}) ->
     MergedVC = get_merged_vcs([VC, NewVC]),
-    {reply, ok, #state{vector_clock=MergedVC}}.
+    {reply, ok, #state{vector_clock=MergedVC}};
 
+
+handle_call(get_vc, _From, S=#state{vector_clock=VC}) ->
+    {reply, VC, S};
+
+
+handle_call(get_cp, _From, S=#state{vector_clock=VC}) ->
+    {reply, vc_to_cp(VC), S}.
 
 %% handle_call({broadcast_vc_to, _Nodes}, _From, State=#state{vector_clock=VC}) ->
     %% %% TODO

@@ -6,7 +6,7 @@
 
 -export([init/2]).
 -export([call/1]).
--export([return/2]).
+-export([return/1]).
 
 %% Response Header
 -define(HEADER, #{<<"content-type">> => <<"application/json">>}).
@@ -24,15 +24,13 @@ init(Req0=#{ method := <<"GET">> }, State) ->
 
 %%%%%%%% DEBUG %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-call(Function) ->
+call(Data) ->
     io:format("~n===================~n"),
-    io:format("Calling function \"~p\"~n", [Function]),
+    io:format("Calling function \"~p\"~n", [Data]),
     io:format("~n===================~n").
 
-return(Function, State) ->
+return(Data) ->
     io:format("~n===================~n"),
-    io:format("Returning from function \"~p\"~n~n", [Function]),
-    io:format("STATE~n"),
-    io:format("~p~n", [State]),
+    io:format("Returning from function \"~p\"~n", [Data]),
     io:format("~n===================~n").
 

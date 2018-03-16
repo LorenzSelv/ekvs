@@ -108,10 +108,10 @@ handle_call({get, Key, RequestCP}, _From, KVS) ->
 
 
 handle_call({put, Key, Value, CausalPayload}, _From, KVS) ->
+    lab4kvs_debug:call({put, Key, Value, CausalPayload, KVS}),
+    %% Update node vector clock and return it
     NewVC = lab4kvs_vcmanager:new_event(CausalPayload),
     KVSValue = prepare_kvsvalue(Key, Value, NewVC),
-    %% Update node vector clock
-    lab4kvs_vcmanager:update_vc(NewVC),
     %% TODO no need to resolve
     %% ResKVSValue = resolve_put(Key, KVSValue, KVS),
     %% ResVC = ResKVSValue#kvsvalue.vector_clock,
@@ -122,6 +122,7 @@ handle_call({put, Key, Value, CausalPayload}, _From, KVS) ->
     NewCausalPayload = lab4kvs_vcmanager:vc_to_cp(NewVC),
     Timestamp = KVSValue#kvsvalue.timestamp,
     Reply = {ok, NewCausalPayload, Timestamp},
+    lab4kvs_debug:return({put, Reply, maps:put(Key, KVSValue, KVS)}),
     %% {reply, Reply, maps:put(Key, ResKVSValue, KVS)};
     {reply, Reply, maps:put(Key, KVSValue, KVS)};
 
@@ -130,11 +131,13 @@ handle_call({put_kvsvalue, Key, KVSValue}, _From, KVS) when is_record(KVSValue, 
     %% Resove the value against what might already be present in the KVS
     %% This function is called only for internal key transfer, 
     %% thus no new event happened
+    lab4kvs_debug:call({put_kvsvalue, Key, KVSValue}),
     ResKVSValue = resolve_put(Key, KVSValue, KVS),
     ResVC = ResKVSValue#kvsvalue.vector_clock,
     ResCausalPayload = lab4kvs_vcmanager:vc_to_cp(ResVC),
     ResTimestamp = ResKVSValue#kvsvalue.timestamp,
     Reply = {ok, ResCausalPayload, ResTimestamp},
+    lab4kvs_debug:return({put_kvsvalue, Reply}),
     {reply, Reply, maps:put(Key, ResKVSValue, KVS)};
 
 
@@ -157,6 +160,7 @@ handle_call({update_vc, Key, VC}, _From, KVS) ->
 
 
 %% TODO delete is not a delete, is a put 'deleted'
+%% TODO delete is also used by move_entries, that one should not change
 handle_call({delete, Key}, _From, KVS) ->
     Reply = {deleted, maps:is_key(Key, KVS)},
     {reply, Reply, maps:remove(Key, KVS)};
@@ -178,9 +182,13 @@ handle_call(all, _From, KVS) ->
 handle_call({keyrange, Start, End}, _From, KVS) ->
     InRange = case Start < End of
                 true ->
-                      fun(_Key, {_Val, Hash}) -> Start =< Hash andalso Hash =< End end;
+                      fun(_Key, KVSValue) -> 
+                              Hash = KVSValue#kvsvalue.hash,
+                              Start =< Hash andalso Hash =< End end;
                 false ->
-                      fun(_Key, {_Val, Hash}) -> Start =< Hash orelse  Hash =< End end
+                      fun(_Key, KVSValue) -> 
+                              Hash = KVSValue#kvsvalue.hash,
+                              Start =< Hash orelse  Hash =< End end
               end,
     KVSRange = maps:to_list(maps:filter(InRange, KVS)),
     {reply, KVSRange, KVS};
@@ -223,6 +231,7 @@ resolve_put(Key, NewKVSValue, KVS) ->
     %% The causal order is determined comparing
     %% VC, Timestamp, node@<ip> in decreasing order of priority
     %%
+    lab4kvs_debug:call({resolve_put, NewKVSValue, KVS}),
     case maps:find(Key, KVS) of
         {ok, KVSValue} ->
             latest_kvsvalue(KVSValue, NewKVSValue);
@@ -234,10 +243,10 @@ resolve_put(Key, NewKVSValue, KVS) ->
 latest_kvsvalue(Va = #kvsvalue{vector_clock=VCa, timestamp=TSa},
                 Vb = #kvsvalue{vector_clock=VCb, timestamp=TSb}) ->
     case lab4kvs_vcmanager:happens_before(VCa, VCb) of 
-        true  -> Va;
+        true  -> Vb;
         false ->
             case lab4kvs_vcmanager:happens_before(VCb, VCa) of
-                true  -> Vb;
+                true  -> Va;
                 false ->
                     %% concurrent
                     if 

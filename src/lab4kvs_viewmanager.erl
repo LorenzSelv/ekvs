@@ -147,7 +147,7 @@ handle_call({view_change, Type, NodeChanged}, _From, View = #view{partitions=Par
     %% lab4kvs_debug:call({view_change, Type}),
     Ref = make_ref(),
     NodesToBroadcast = case Type of add -> get_all_nodes(Partitions) ++ [NodeChanged];
-                                 remove -> get_all_nodes(Partitions) end,
+                                 remove -> get_all_nodes(Partitions) -- [NodeChanged] end,
 
     broadcast_view_change(Type, NodeChanged, Ref, NodesToBroadcast, View),
     NewView = apply_view_change(Type, NodeChanged, View),
@@ -193,10 +193,16 @@ handle_info({view_change, Type, NodeChanged, {NodeToACK, Ref}, BroadcastedView},
     %% as part of the broadcast message (BroadcastedView)
     %%
     io:format("Received broadcast view_change ~p ~p from ~p~n", [Type, NodeChanged, NodeToACK]),
-    NewView = apply_view_change(Type, NodeChanged, BroadcastedView),
+    io:format("BroadcastedView~n~p~n", [BroadcastedView]),
+
+    ID = lab4kvs_viewutils:get_partition_id(node(), BroadcastedView#view.partitions),
+    View = BroadcastedView#view{partition_id=ID},
+    NewView = apply_view_change(Type, NodeChanged, View),
+
     %% Send the ACK back to the node who broadcasted the view_change
     {view_manager, NodeToACK} ! {node(), Ref},
     io:format("ACKed broadcast view_change ~p ~p from ~p~n", [Type, NodeChanged, NodeToACK]),
+    io:format("View after view_change ~p~n", [NewView]),
     {noreply, NewView};
 
 
@@ -239,12 +245,15 @@ apply_view_change(Type, NodeChanged, View) ->
     Partitions = View#view.partitions,
     ReplicasPerPartition = View#view.replicas_per_partition,
     Ops = lab4kvs_viewutils:get_transformation_ops(Type, NodeChanged, Partitions, ReplicasPerPartition),
+    io:format("TRANSF OPS ~p~n", [Ops]),
     %% Apply all operations sequentially, each operation is in the format
     %% Op = {add|add_partition|remove|remove_partition, node, partition_id} 
     %% apply_view_change_op takes an Op and the current View and return
     %% the resulting view, used in the next foldl iteration
     NewView = lists:foldl(fun apply_view_change_op/2, View, Ops),
-    NewView.
+    %% Make sure the partition ID is updated
+    ID = lab4kvs_viewutils:get_partition_id(node(), NewView#view.partitions),
+    NewView#view{partition_id=ID}.
 
 
 apply_view_change_op(_Op={add, NodeToInsert, AffectedPartitionID}, View = #view{partition_id=PartitionID,
@@ -254,6 +263,7 @@ apply_view_change_op(_Op={add, NodeToInsert, AffectedPartitionID}, View = #view{
     %% The keys belonging to the affected partition should be replicated in the new node
     %%
     AffectedPartition = maps:get(AffectedPartitionID, Partitions),
+    %% TODO remove
     SelectedNode = select_node(AffectedPartition),
     case PartitionID =:= AffectedPartitionID andalso node() =:= SelectedNode of
         true -> %% I belong to the affected partition and I have been 
@@ -295,15 +305,18 @@ apply_view_change_op(_Op={remove, NodeToRemove, AffectedPartitionID}, View = #vi
     View#view{partitions=NewPartitions}; 
 
 
-apply_view_change_op(_Op={remove_partition, NodeToRemove, OldPartitionID}, View = #view{partitions=Partitions,
+apply_view_change_op(_Op={remove_partition, NodeToRemove, OldPartitionID}, View = #view{partition_id=PartitionID,
+                                                                                        partitions=Partitions,
                                                                                         tokens=Tokens}) ->
-    %% The node has been deleted from a partition with a single node 
-    %% The partition has to be removed and its keys transferred to the other partitions
-    %% Retrieve all partition's tokens and transfer the keys to the other partitions
+    %% Under the assumption that a partition with a single node never dies,
+    %% this can only happen before a merge.  If the current node belongs
+    %% to the merged partition, it has to redistribute its own keys
+    %% where they belong to in the new configuration.
     %%
     UpdatedTokens = [{Hash, Partition} || {Hash, Partition} <- Tokens, Partition =/= OldPartitionID],
-    case NodeToRemove =:= node() of
-        true -> %% I'm being deleted, move all my keys to other partitions
+    case OldPartitionID =:= PartitionID of
+        true -> %% I'm being merged and my old partition deleted,
+                %% move all my keys to other partitions
             KVSEntries = lab4kvs_kvstore:get_all_entries(),
             GetKeyOwner = fun({Key, _}) -> {_H, KOwn} = lab4kvs_viewutils:get_key_owner_token(Key, UpdatedTokens), 
                                            KOwn end,
@@ -326,18 +339,16 @@ move_keys(TokenToInsert = {Hash, DestPartition}, Tokens, DestNode, PartitionID, 
     lab4kvs_debug:call(move_keys_add),
     {PrevHash, _PrevPartition} = lab4kvs_viewutils:get_prev(TokenToInsert, Tokens),
     {_NextHash, NextPartition} = lab4kvs_viewutils:get_next(TokenToInsert, Tokens),
-    SourceNodes = maps:get(PartitionID, Partitions),
-    SelectedNode = select_node(SourceNodes),
-    case NextPartition =:= PartitionID andalso DestPartition =/= PartitionID andalso 
-         SelectedNode  =:= node() of
+    %% SourceNodes = maps:get(PartitionID, Partitions),
+    %% SelectedNode = select_node(SourceNodes),
+    case NextPartition =:= PartitionID andalso DestPartition =/= PartitionID of
         true  -> %% The keys to be moved to the new partition belong to my partition
-                 %% I have been selected to move keys to the new virtual partition
             io:format("Moving keys in range ~p to ~p~n", [{PrevHash+1, Hash}, DestNode]),
             move_keyrange({PrevHash + 1, Hash}, DestNode);
         false -> %% Not my responsibility, nothing to do
             io:format("Keys are not mine or I have not been seleceted, continue")
     end,
-    lab4kvs_debug:return(move_keys_add, Tokens ++ [TokenToInsert]),
+    lab4kvs_debug:return({move_keys_add, Tokens ++ [TokenToInsert]}),
     %% Update the token list to be used at the next iteration in foldl
     lab4kvs_viewutils:insert_token(TokenToInsert, Tokens).
 
@@ -349,7 +360,7 @@ move_keyrange({Start, End}, DestNode) ->
     KVSRangeEntries = lab4kvs_kvstore:get_keyrange_entries(Start, End),
     io:format("KVSRange ~p~n", [KVSRangeEntries]),
     move_entries(KVSRangeEntries, DestNode),
-    lab4kvs_debug:return(move_keyrange, nostate).
+    lab4kvs_debug:return({move_keyrange, nostate}).
 
 
 move_entries([], _DestNode) -> ok;

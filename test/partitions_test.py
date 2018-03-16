@@ -9,6 +9,12 @@ random.seed(100)
 import matplotlib.pyplot as plt
 import numpy as np
 
+HEADER = '\033[95m'
+OKBLUE = '\033[94m'
+OKGREEN = '\033[92m'
+FAIL = '\033[91m'
+ENDC = '\033[0m'
+
 VERBOSE = True
 
 DOCKER_RUN      = 'docker run -p %d:8080 --net=lab4net --ip=%s -e K=%d -e              "ip_port"="%s:8080" -e TOKENSPERPARTITION="%d" lab4erlang'
@@ -56,6 +62,7 @@ def run_new_node(view=None):
     
     node = {'localport': localport,
             'url': url,
+            'ip': ip,
             'ipport': ipport,
             'logfile': logfile,
             'docker_id': docker_id}
@@ -99,24 +106,36 @@ def kill_nodes():
 def inspect_nodes():
     snapshot = []
     for i, node in enumerate(NODES):
-        res = requests.get(node['url'] + 'kvs/debug')
-        data = res.json()
-        snapshot.append('===============')
-        snapshot.append('NODE %s' % node['ipport'])
-        snapshot.append(data['view'])
-        snapshot.append(data['kvs'])
-        snapshot.append('===============')
+        # print(node)
+        try: ## Node might be disconnected
+            res = requests.get(node['url'] + 'kvs/debug')
+            data = res.json()
+            snapshot.append('===============')
+            snapshot.append('NODE %s' % node['ipport'])
+            snapshot.append(data['view'])
+            snapshot.append(data['kvs'])
+            snapshot.append('===============')
+        except requests.exceptions.ConnectionError:
+            print('[DEBUG] node %d is DISCONNECTED' % i)
+
     # if VERBOSE: 
         # print('\n'.join(snapshot))
     return snapshot
 
+def cp_to_dot_vc(cp):
+    nodes = cp.split(',')
+    clocks = [node.split(':')[1] for node in nodes]
+    return ','.join(clocks)
 
 def get_key(node, key, cp=''):
-    res = requests.get(node['url'] + 'kvs?key=%s&causal_payload=%s' % (key, cp))
-    data = res.json()
     if VERBOSE:
-        print('GET %s' % key)
-        print(data)
+        print('GET %s cp=%s' % (key, cp))
+    res = requests.get(node['url'] + 'kvs?key=%s&causal_payload=%s' % (key, cp))
+    # print(res)
+    data = res.json()
+    val, cp = data['value'], data['causal_payload']
+    if VERBOSE:
+        print(OKGREEN + 'Result: %s cp=%s' % (val, cp_to_dot_vc(cp)) + ENDC)
     return data['value'], data['causal_payload']
 
 
@@ -124,18 +143,19 @@ def put_key(node, key, value, cp):
     if VERBOSE:
         print('PUT node=%s key=%s value=%s cp=%s' % (node['ipport'], key, value, cp))
     res = requests.put(node['url'] + 'kvs', data={'key': key, 'value': value, 'causal_payload': cp})
-    print(res, res.status_code)
+    # print(res)
     data = res.json()
     if VERBOSE:
-        print(data)
+        print('Result: ', data)
     return data['causal_payload']
 
 
 def del_key(node, key):
+    if VERBOSE:
+        print('DEL %s' % key)
     res = requests.delete(node['url'] + 'kvs?key=%s' % key)
     data = res.json()
     if VERBOSE:
-        print('DEL %s' % key)
         print(data)
 
 
@@ -151,20 +171,30 @@ def view_update(change_type, node_to_remove_idx=None):
         idx = node_to_remove_idx
         if idx is None:
             idx = rnodeidx()
+        ## Make sure the node to be deleted is not the only one in the partition
+        members = get_partition_members(rnode(), idx)
+        while len(members) == 1:
+            idx = rnodeidx()
+            members = get_partition_members(rnode(), idx)
         node = NODES[idx]
 
+
     ipport = node['ipport']
+
+    print('VIEW_UPDATE %s %s' % (change_type, ipport))
+    # if VERBOSE:
+        # print('VIEW_UPDATE %s %s' % (change_type, ipport))
+
     data = {'type': change_type, 'ip_port': ipport}
     url = node_to_ask['url'] + 'kvs/view_update' 
-    print((url, data))
+    # print((url, data))
 
     res = requests.put(url, data) 
     
     assert res.status_code == 200
 
     if VERBOSE:
-        print('VIEW_UPDATE %s %s' % (change_type, ipport))
-        print(res.json())
+        print('Result: ', res.json())
 
     if change_type == 'remove':
         kill_node(idx) 
@@ -202,6 +232,7 @@ def populate(num_key, cp=''):
         key = 'key%d' % i
         val = 'val%d' % i
         cp = put_key(rnode(), key, val, cp)
+    return cp
 
 
 def RYW(num_key, cp=''):
@@ -210,6 +241,7 @@ def RYW(num_key, cp=''):
         val = 'val%d' % i
         get_val, cp = get_key(rnode(), key, cp)
         assert val == get_val
+    return cp
 
 
 def delete_keyrange(start, end):
@@ -250,7 +282,7 @@ def gen_view(num_nodes):
 
 def get_partition_id(node):
     res = requests.get(node['url'] + 'kvs/get_partition_id')
-    print(res)
+    # print(res)
     data = res.json()
     if VERBOSE:
         print(data)
@@ -259,7 +291,7 @@ def get_partition_id(node):
 
 def get_partition_ids(node):
     res = requests.get(node['url'] + 'kvs/get_all_partition_ids')
-    print(res)
+    # print(res)
     data = res.json()
     if VERBOSE:
         print(data)
@@ -268,12 +300,104 @@ def get_partition_ids(node):
 
 def get_partition_members(node, partition_id):
     res = requests.get(node['url'] + 'kvs/get_partition_members?partition_id=%d' % partition_id)
-    print(res)
+    # print(res)
     data = res.json()
-    if VERBOSE:
-        print(data)
+    # if VERBOSE:
+        # print(data)
     return data['partition_members']
 
+def disconnect_node(node):
+    if VERBOSE:
+        print('DISCONNECT node ' + node['ipport'])
+    docker_disconnect = "docker network disconnect lab4net " + node['docker_id']
+    print(docker_disconnect)
+    # out = subprocess.check_output(docker_disconnect, stderr=subprocess.STDOUT, shell=True)
+    os.system(docker_disconnect)
+    # print(out)
+
+def connect_node(node):
+    if VERBOSE:
+        print('CONNECT node ' + node['ipport'])
+    docker_connect = "docker network connect lab4net --ip=%s %s" % (node['ip'], node['docker_id'])
+    print(docker_connect)
+    # out = subprocess.check_output(docker_connect, stderr=subprocess.STDOUT, shell=True)
+    os.system(docker_connect)
+    # print(out)
+
+def get_partitions():
+    partitions = {}
+    for node in NODES:
+        pid = get_partition_id(node)
+        partitions.setdefault(pid, [])
+        partitions[pid].append(node['ipport'])
+    print(partitions)
+    return partitions
+
+
+def test_7_TA():
+    global TOKENS_PER_PARTITION
+    global K
+
+    num_nodes = 2
+    num_keys  = 5 
+
+    TOKENS_PER_PARTITION = 1
+    K = 2
+
+    init_cluster(gen_view(num_nodes))
+
+    snapshot_to_file('0init')
+
+    populate(num_keys)
+    # assert ???num_keys == get_totnumkey()
+    cp = RYW(num_keys)
+
+    snapshot_to_file('1populated')
+
+    # disconnect_node(NODES[1])
+    # connect_node(NODES[1])
+
+    # snapshot_to_file('2put_disconnected')
+
+
+    # sleep(1)
+
+    # snapshot_to_file('3connected')
+
+    # val, cp = get_key(NODES[1], 'X', cp)
+    
+    # print('val,cp', val, cp)
+
+    # assert val == '2'
+
+    snapshot_to_file('4before_numkey')
+
+    real = get_totnumkey()
+    
+    def change(t, i):
+        ## VIEW CHANGE
+        view_update(t)
+        tot = get_totnumkey()
+        get_partitions()
+        print(tot)
+        print('='*30)
+        RYW(num_keys)
+        snapshot_to_file('%d%s' % (i, t))
+
+    change('add', 5)
+    change('add', 6)
+    change('add', 7)
+    change('add', 8)
+    change('remove', 9)
+    change('remove', 10)
+    change('remove', 11)
+    
+    val, cp = get_key(NODES[1], 'X', cp)
+    
+    print('val,cp', val, cp)
+    
+     
+    kill_nodes()
 
 def test_kvsop():
     global TOKENS_PER_PARTITION
@@ -392,6 +516,7 @@ def test_partitions():
 if __name__ == '__main__':
     # test_partitions_info()
     # test_partitions()
-    test_kvsop()
+    # test_kvsop()
+    test_7_TA()
 
 
