@@ -683,9 +683,9 @@ def test_delete_key_disconnected():
     global K
 
     num_nodes = 7
-    num_keys  = 8 
+    num_keys  = 100
 
-    TOKENS_PER_PARTITION = 2
+    TOKENS_PER_PARTITION = 10
     K = 2
 
     init_cluster(gen_view(num_nodes))
@@ -711,6 +711,8 @@ def test_delete_key_disconnected():
     snapshot_to_file('2final')
 
     RYW(num_keys, cp)
+
+    print(get_totnumkey())
 
     kill_nodes()
 

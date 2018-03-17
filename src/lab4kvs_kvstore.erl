@@ -199,7 +199,7 @@ handle_call({keyrange, Start, End}, _From, KVS) ->
 
 handle_call(numkeys, _From, KVS) ->
     %% Filter out deleted keys
-    Real = fun(_, deleted) -> false;
+    Real = fun(_, #kvsvalue{value=deleted}) -> false;
               (_, _Value)  -> true end,
     RealKVS = maps:filter(Real, KVS),
     {reply, maps:size(RealKVS), KVS};
