@@ -168,16 +168,19 @@ def view_update(change_type, node_to_remove_idx=None):
     if change_type == 'add':
         node = run_new_node()
     else:
-        idx = node_to_remove_idx
-        if idx is None:
-            idx = rnodeidx()
+        # idx = node_to_remove_idx
+        # if idx is None:
+            # idx = rnodeidx()
         ## Make sure the node to be deleted is not the only one in the partition
-        members = get_partition_members(rnode(), idx)
-        while len(members) == 1:
-            idx = rnodeidx()
-            members = get_partition_members(rnode(), idx)
-        node = NODES[idx]
-
+        for i, curnode in enumerate(NODES):
+            if curnode == node_to_ask:
+                continue
+            pid = get_partition_id(curnode)
+            members = get_partition_members(rnode(), pid)
+            if len(members) > 1:
+                idx, node = i, curnode
+                break
+        kill_node(idx)
 
     ipport = node['ipport']
 
@@ -187,7 +190,7 @@ def view_update(change_type, node_to_remove_idx=None):
 
     data = {'type': change_type, 'ip_port': ipport}
     url = node_to_ask['url'] + 'kvs/view_update' 
-    # print((url, data))
+    print((url, data))
 
     res = requests.put(url, data) 
     
@@ -195,9 +198,6 @@ def view_update(change_type, node_to_remove_idx=None):
 
     if VERBOSE:
         print('Result: ', res.json())
-
-    if change_type == 'remove':
-        kill_node(idx) 
 
     return node
 
@@ -299,6 +299,7 @@ def get_partition_ids(node):
 
 
 def get_partition_members(node, partition_id):
+    print('Asking partition members of %d to %s' % (partition_id, node['ipport']))
     res = requests.get(node['url'] + 'kvs/get_partition_members?partition_id=%d' % partition_id)
     # print(res)
     data = res.json()
@@ -354,35 +355,21 @@ def test_7_TA():
 
     snapshot_to_file('1populated')
 
-    # disconnect_node(NODES[1])
-    # connect_node(NODES[1])
-
-    # snapshot_to_file('2put_disconnected')
-
-
-    # sleep(1)
-
-    # snapshot_to_file('3connected')
-
-    # val, cp = get_key(NODES[1], 'X', cp)
-    
-    # print('val,cp', val, cp)
-
-    # assert val == '2'
-
     snapshot_to_file('4before_numkey')
 
     real = get_totnumkey()
     
     def change(t, i):
         ## VIEW CHANGE
+        print('='*30)
+        print('CHANGE %d' % i)
         view_update(t)
         tot = get_totnumkey()
         get_partitions()
         print(tot)
         print('='*30)
-        RYW(num_keys)
         snapshot_to_file('%d%s' % (i, t))
+        RYW(num_keys)
 
     change('add', 5)
     change('add', 6)
@@ -391,11 +378,6 @@ def test_7_TA():
     change('remove', 9)
     change('remove', 10)
     change('remove', 11)
-    
-    val, cp = get_key(NODES[1], 'X', cp)
-    
-    print('val,cp', val, cp)
-    
      
     kill_nodes()
 

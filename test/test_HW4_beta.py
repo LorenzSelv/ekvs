@@ -301,8 +301,8 @@ if __name__ == "__main__":
     hostname = 'localhost'
     network = 'lab4net'
     sudo = ''
-    # tests_to_run = [1,2,3,4,5,6,7,8] #  
-    tests_to_run = [7] #  
+    tests_to_run = [1,2,3,4,5,6,7,8] #  
+    # tests_to_run = [7] #  
 
     if 1 in tests_to_run:
         try: # Test 1

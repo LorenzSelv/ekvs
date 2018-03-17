@@ -130,36 +130,39 @@ get_transformation_ops_test(3) ->
     Ops = lab4kvs_viewutils:get_transformation_ops(add, n4, Partitions, K),
     ?assertMatch([{add, n4, 1}], Ops);
 
-get_transformation_ops_test(4) ->
-    K = 3,
-    Partitions = #{0 => [n0, n1, n2], 1 => [n3]},
-    Ops = lab4kvs_viewutils:get_transformation_ops(remove, n3, Partitions, K),
-    ?assertMatch([{remove_partition, n3, 1}], Ops);
+%% Never happens
+%% get_transformation_ops_test(4) ->
+    %% K = 3,
+    %% Partitions = #{0 => [n0, n1, n2], 1 => [n3]},
+    %% Ops = lab4kvs_viewutils:get_transformation_ops(remove, n3, Partitions, K),
+    %% ?assertMatch([{remove_partition, n3, 1}], Ops);
 
-get_transformation_ops_test(5) ->
+get_transformation_ops_test(4) ->
     K = 3,
     Partitions = #{0 => [n0, n1, n2], 1 => [n3, n4]},
     Ops = lab4kvs_viewutils:get_transformation_ops(remove, n3, Partitions, K),
     ?assertMatch([{remove, n3, 1}], Ops);
 
-get_transformation_ops_test(6) ->
+get_transformation_ops_test(5) ->
     K = 2,
     Partitions = #{0 => [n0, n1], 1 => [n2]},
     Ops = lab4kvs_viewutils:get_transformation_ops(remove, n1, Partitions, K),
     ?assertMatch([{remove, n1, 0},
-                  {add,    n2, 0},
-                  {remove_partition, n2, 1}], Ops);
+                  {move_keys_merged_partition, 1},
+                  {remove, n2, 1},
+                  {add, n2, 0}], Ops);
 
-get_transformation_ops_test(7) ->
+get_transformation_ops_test(6) ->
     K = 3,
     Partitions = #{0 => [n0, n1, n2], 1 => [n3]},
     Ops = lab4kvs_viewutils:get_transformation_ops(remove, n1, Partitions, K),
     ?assertMatch([{remove, n1, 0},
-                  {add,    n3, 0},
-                  {remove_partition, n3, 1}], Ops).
+                  {move_keys_merged_partition, 1},
+                  {remove, n3, 1},
+                  {add,    n3, 0}], Ops).
 
 
 get_transformation_ops_test() ->
-    [get_transformation_ops_test(N) || N <- lists:seq(1, 7)].
+    [get_transformation_ops_test(N) || N <- lists:seq(1, 6)].
 
 

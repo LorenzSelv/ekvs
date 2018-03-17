@@ -268,8 +268,14 @@ apply_view_change_op(_Op={add, NodeToInsert, AffectedPartitionID}, View = #view{
     case PartitionID =:= AffectedPartitionID andalso node() =:= SelectedNode of
         true -> %% I belong to the affected partition and I have been 
                 %% selected to replicate my keys in the new node
+            io:format("I belong to the affected partition and I have been selected to replicate my keys in the new node ~p~n", [NodeToInsert]),
             EntriesToReplicate = lab4kvs_kvstore:get_all_entries(),
-            rpc:call(NodeToInsert, lab4kvs_kvstore, put_list, [EntriesToReplicate]);
+            io:format("Node ~p replicates its entries ~p to ~p~n", [node(), EntriesToReplicate, NodeToInsert]),
+            Res = rpc:call(NodeToInsert, lab4kvs_kvstore, put_list, [EntriesToReplicate]),
+            io:format("RES ~p~n", [Res]),
+            ok = Res,
+            Replicated = rpc:call(NodeToInsert, lab4kvs_kvstore, get_all_entries, []),
+            io:format("~p~n", [Replicated]);
         false -> %% Nothing to do
             io:format("Node ~p replicates its key to ~p~n", [SelectedNode, NodeToInsert])
     end,
@@ -295,19 +301,27 @@ apply_view_change_op(_Op={add_partition, NodeToInsert, NewPartitionID}, View = #
     View#view{partitions=NewPartitions,tokens=UpdatedTokens};
 
 
-apply_view_change_op(_Op={remove, NodeToRemove, AffectedPartitionID}, View = #view{partitions=Partitions}) ->
+apply_view_change_op(_Op={remove, NodeToRemove, AffectedPartitionID}, View = #view{partitions=Partitions,
+                                                                                   tokens=Tokens}) ->
     %% The node has been removed from a partition with more than one node
     %% No keys should be moved among partitions, nothing to replicate
     %%
     OldNodes = maps:get(AffectedPartitionID, Partitions),
     NewNodes = OldNodes -- [NodeToRemove],
-    NewPartitions = maps:put(AffectedPartitionID, NewNodes, Partitions),
-    View#view{partitions=NewPartitions}; 
+    case length(NewNodes) of 
+        0 ->  %% Last node in the partition, remove the partition and all its tokens
+            NewPartitions = maps:remove(AffectedPartitionID, Partitions),
+            UpdatedTokens = [{Hash, Partition} || {Hash, Partition} <- Tokens, Partition =/= AffectedPartitionID],
+            View#view{partitions=NewPartitions, tokens=UpdatedTokens};
+        _ -> 
+            NewPartitions = maps:put(AffectedPartitionID, NewNodes, Partitions),
+            View#view{partitions=NewPartitions}
+    end;
 
 
-apply_view_change_op(_Op={remove_partition, NodeToRemove, OldPartitionID}, View = #view{partition_id=PartitionID,
-                                                                                        partitions=Partitions,
-                                                                                        tokens=Tokens}) ->
+apply_view_change_op(_Op={move_keys_merged_partition, OldPartitionID}, View = #view{partition_id=PartitionID,
+                                                                                    partitions=Partitions,
+                                                                                    tokens=Tokens}) ->
     %% Under the assumption that a partition with a single node never dies,
     %% this can only happen before a merge.  If the current node belongs
     %% to the merged partition, it has to redistribute its own keys
@@ -318,18 +332,15 @@ apply_view_change_op(_Op={remove_partition, NodeToRemove, OldPartitionID}, View 
         true -> %% I'm being merged and my old partition deleted,
                 %% move all my keys to other partitions
             KVSEntries = lab4kvs_kvstore:get_all_entries(),
-            GetKeyOwner = fun({Key, _}) -> {_H, KOwn} = lab4kvs_viewutils:get_key_owner_token(Key, UpdatedTokens), 
-                                           KOwn end,
-            %% TODO optimize merging distinct RPC calls to the same destination node
-            %%      build a map [DestNode => [Entries..]] and call move_entries for each pair
+            GetKeyOwners = fun({Key, _}) -> {_H, PartID} = lab4kvs_viewutils:get_key_owner_token(Key, UpdatedTokens), 
+                                           maps:get(PartID, Partitions) end,
             io:format("Moving entries..~n"),
-            [move_entry(KVSEntry, GetKeyOwner(KVSEntry)) || KVSEntry <- KVSEntries],
+            [move_entry(KVSEntry, GetKeyOwners(KVSEntry)) || KVSEntry <- KVSEntries],
             io:format("DONE Moving entries~n");
         false -> %% I'm not the node being deleted, nothing to do
-            io:format("I'm not the node being deleted, nothing to do ~p =/= ~p ~n", [NodeToRemove, node()])
+            io:format("I do not belong to the merged partition, nothing to do ~p~n", [node()])
     end,
-    NewPartitions = maps:remove(OldPartitionID, Partitions),
-    View#view{partitions=NewPartitions, tokens=UpdatedTokens}.
+    View.
 
 
 move_keys(TokenToInsert = {Hash, DestPartition}, Tokens, DestNode, PartitionID, Partitions) ->
@@ -375,13 +386,20 @@ move_entries(KVSEntries, DestNode) when is_list(KVSEntries) ->
     lab4kvs_kvstore:delete_list([Key || {Key, _} <- KVSEntries]),
     io:format("Moved  entries ~p to ~p~n", [KVSEntries, DestNode]).
 
-move_entry({Key, KVSValue}, DestNode) ->
-    %% RPC to destnode to insert the key, local call to delete the key
+
+move_entry({Key, KVSValue}, DestNodes) ->
+    %% RPC to destnodes to insert the key, local call to delete the key
     %%
-    io:format("Moving entry ~p to ~p~n", [{Key, KVSValue}, DestNode]),
-    rpc:call(DestNode, lab4kvs_kvstore, put, [Key, KVSValue]),
-    lab4kvs_kvstore:delete(Key),
-    io:format("Moved entry ~p to ~p~n", [{Key, KVSValue}, DestNode]).
+    io:format("Moving entry ~p to ~p~n", [{Key, KVSValue}, DestNodes]),
+    Move = fun(DestNode) ->
+            Res = rpc:call(DestNode, lab4kvs_kvstore, put, [Key, KVSValue]),
+            io:format("~p~n", [Res]),
+            {ok, _, _} = Res,
+            io:format("DELETINGGGGGGGGGGGGGGGGGGGG~n"),
+            lab4kvs_kvstore:delete(Key),
+            io:format("DELETEDDDDDDDDDDDDDDDDDDDDD~n") end,
+    lists:map(Move, DestNodes),
+    io:format("Moved entry ~p to ~p~n", [{Key, KVSValue}, DestNodes]).
 
 
 get_all_nodes(Partitions) ->

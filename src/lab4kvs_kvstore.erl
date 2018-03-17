@@ -137,17 +137,20 @@ handle_call({put_kvsvalue, Key, KVSValue}, _From, KVS) when is_record(KVSValue, 
     ResCausalPayload = lab4kvs_vcmanager:vc_to_cp(ResVC),
     ResTimestamp = ResKVSValue#kvsvalue.timestamp,
     Reply = {ok, ResCausalPayload, ResTimestamp},
-    lab4kvs_debug:return({put_kvsvalue, Reply}),
-    {reply, Reply, maps:put(Key, ResKVSValue, KVS)};
+    NewKVS = maps:put(Key, ResKVSValue, KVS),
+    lab4kvs_debug:return({put_kvsvalue, NewKVS}),
+    {reply, Reply, NewKVS};
 
 
-handle_call({put_list, []}, _From, KVS) -> {reply, ok, KVS};
+handle_call({put_list, []}, _From, KVS) -> {reply, empty, KVS};
 
 handle_call({put_list, KVSEntries}, _From, KVS) ->
+    lab4kvs_debug:call({put_list, KVSEntries, KVS}),
     Put = fun ({Key, KVSValue}, Map) ->
             ResolvedKVSValue = resolve_put(Key, KVSValue, Map),
             maps:put(Key, ResolvedKVSValue, Map) end,
     NewKVS = lists:foldl(Put, KVS, KVSEntries),
+    lab4kvs_debug:return({put_list, NewKVS}),
     {reply, ok, NewKVS};
 
 
