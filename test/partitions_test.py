@@ -29,6 +29,9 @@ NODES = []
 
 NEXT_IDX = 0
 
+## ground truth KVS hash map
+KVS = {}
+
 
 def get_current_view():
     return ','.join(node['ipport'] for node in NODES)
@@ -228,17 +231,30 @@ def rnodeidx():
 
 
 def populate(num_key, cp='', start=0):
+    global KVS
     for i in range(start, num_key):
         key = 'key%d' % i
         val = 'val%d' % i
         cp = put_key(rnode(), key, val, cp)
+        KVS[key] = val
+    return cp
+
+
+def update_keyrange(start, stop, cp):
+    global KVS
+    for i in range(start, stop):
+        key = 'key%d' % i
+        val = 'val%d' % random.randint(0, 1000)
+        cp = put_key(rnode(), key, val, cp)
+        KVS[key] = val
     return cp
 
 
 def RYW(num_key, cp=''):
+    global KVS
     for i in range(num_key):
         key = 'key%d' % i
-        val = 'val%d' % i
+        val = KVS[key]
         get_val, cp = get_key(rnode(), key, cp)
         assert val == get_val
     return cp
@@ -601,14 +617,20 @@ def test_kvsop_after_view_changes():
     view_update('add')
     cp, num_keys = more_keys(10, cp, num_keys)
 
+    cp = update_keyrange(num_keys-30, num_keys-10, cp)
+
     view_update('add')
     cp, num_keys = more_keys(10, cp, num_keys)
 
     view_update('remove')
     cp, num_keys = more_keys(10, cp, num_keys)
 
+    cp = update_keyrange(random.randint(0, num_keys//2), random.randint(num_keys//2, num_keys), cp)
+
     view_update('remove')
     cp, num_keys = more_keys(10, cp, num_keys)
+
+    cp = update_keyrange(random.randint(0, num_keys//2), random.randint(num_keys//2, num_keys), cp)
 
     view_update('remove')
     cp, num_keys = more_keys(10, cp, num_keys)
