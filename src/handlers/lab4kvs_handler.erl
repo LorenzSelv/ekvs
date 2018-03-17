@@ -29,7 +29,12 @@
         <<"timestamp">> => Timestamp
      })).
 
--define(BODY_DELETE, jsx:encode(#{<<"msg">> => <<"success">>})).
+-define(BODY_DELETE(Payload, Timestamp), 
+    jsx:encode(#{
+        <<"msg">> => <<"success">>,
+        <<"causal_payload">> => Payload, 
+        <<"timestamp">> => Timestamp
+     })).
 
 -define(BODY_KEYERROR, jsx:encode(#{<<"msg">> => <<"error">>, <<"error">> => <<"key does not exist">>})).
 
@@ -89,9 +94,9 @@ get_kvs_query(Key, RequestCP, Req0) ->
         {{ok, Value, CP, Timestamp}, PartitionID} ->
             Body = ?BODY_GET(Value, PartitionID, CP, Timestamp),
             cowboy_req:reply(200, ?HEADER, Body, Req0);
-        {keyerror, _PartitionID} -> %% TODO reason
+        {keyerror, _PartitionID} ->
             cowboy_req:reply(404, ?HEADER, ?BODY_KEYERROR, Req0);
-        {all_disconnected, _PartitionID} -> %% TODO Service unavailable
+        {all_disconnected, _PartitionID} ->
             node_down_reply(all_disconnected, Req0)
     end.
 
@@ -106,15 +111,15 @@ put_kvs_query(Key, Value, RequestCP, Req0) ->
     end.
 
 
-%% TODO delete key
 delete_kvs_query(Key, Payload, Req0) ->
-    case klab4kvs_kvsquery:exec(delete, [Key, Payload]) of
-        {deleted,  true} ->
-            cowboy_req:reply(200, ?HEADER, ?BODY_DELETE, Req0);
-        {deleted, false} ->
+    case lab4kvs_kvsquery:exec(delete, [Key, Payload]) of
+        {{ok, CP, Timestamp}, _PartitionID} ->
+            Body = ?BODY_DELETE(CP, Timestamp),
+            cowboy_req:reply(200, ?HEADER, Body, Req0);
+        {keyerror, _PartitionID} ->
             cowboy_req:reply(404, ?HEADER, ?BODY_KEYERROR, Req0);
-        {badrpc, Reason} ->
-            node_down_reply(Reason, Req0)
+        {all_disconnected, _PartitionID} -> %% Service unavailable
+            node_down_reply(all_disconnected, Req0)
     end.
 
 

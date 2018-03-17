@@ -7,6 +7,7 @@
 -export([init/2]).
 -export([call/1]).
 -export([return/1]).
+-export([log/1]).
 
 %% Response Header
 -define(HEADER, #{<<"content-type">> => <<"application/json">>}).
@@ -25,12 +26,18 @@ init(Req0=#{ method := <<"GET">> }, State) ->
 %%%%%%%% DEBUG %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 call(Data) ->
+    %% TODO disable logging
     io:format("~n===================~n"),
     io:format("Calling function \"~p\"~n", [Data]),
     io:format("~n===================~n").
 
 return(Data) ->
+    %% TODO disable logging
     io:format("~n===================~n"),
     io:format("Returning from function \"~p\"~n", [Data]),
     io:format("~n===================~n").
+
+log(Data) ->
+    %% TODO rename all io:format to log
+    io:format("[LOG] ~p~n", [Data]).
 

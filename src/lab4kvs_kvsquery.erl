@@ -9,8 +9,6 @@
 
 -define(FORWARD_TIMEOUT, 200).
 
-%% TODO refactor duplicate definition
--record(kvsvalue, {value, hash, vector_clock, timestamp}).
 
 exec(Func, Args) ->
     %% Execute a query on the kvs
@@ -73,7 +71,7 @@ run_kvs_query_at(Nodes, put, [Key, Value, CP]) ->
     %%        propagate the updated VC
     %%
     %% Return values
-    %%  - {ok, Value, CausalPayload, Timestamp}
+    %%  - {ok, CausalPayload, Timestamp}
     %%  - all_disconnected
     %%
     case lists:member(node(), Nodes) of
@@ -90,7 +88,35 @@ run_kvs_query_at(Nodes, put, [Key, Value, CP]) ->
             end;
         false ->
             forward_kvs_query_to(Nodes, put, [Key, Value, CP])
+    end;
+
+run_kvs_query_at(Nodes, delete, [Key, CP]) ->
+    %% To make sure a deleted key remains deleted after a partition
+    %% is healed, a key is never deleted from the KVS.
+    %% Instead, we perform a PUT <key_to_delete, 'deleted'>.
+    %% This tombstone entry in the KVS has a causal payload associated
+    %% with it, thus allowing to know when the deletion occurred. 
+    %%
+    %% During a GET operation, if the value is 'deleted'
+    %% then a keyerror response is sent.
+    %%
+    %% Note: 'deleted' (atom) is not the same as 
+    %%       "deleted" (string)
+    %%    => a put request (key, "deleted") insert 
+    %%       the new entry with no unexpected behavior
+    %%
+    %% Before deleting the key, make sure it's currently present in the KVS.
+    %%
+    case run_kvs_query_at(Nodes, get, [Key, CP]) of
+        {ok, _, _, _} ->  %% Key present in the KVS, proceed with deletion
+            run_kvs_query_at(Nodes, put, [Key, deleted, CP]);
+        keyerror ->  %% Key is not present
+            keyerror;
+        all_disconnected ->  %% All node in the partition are disconnected
+            all_disconnected
     end.
+
+
 
 
 forward_kvs_query_to([], get, _) -> all_disconnected;

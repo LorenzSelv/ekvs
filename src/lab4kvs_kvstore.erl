@@ -93,8 +93,8 @@ init(_Args) ->
 
 handle_call({get, Key, RequestCP}, _From, KVS) ->
     Reply = case maps:find(Key, KVS) of
-                %% TODO handle deleted keys
-                %% {ok, #kvsvalue{value=deleted}} -> keyerror;
+                {ok, #kvsvalue{value=deleted}} -> 
+                    keyerror;
                 {ok, #kvsvalue{value=Value,
                                vector_clock=VC,
                                timestamp=Timestamp}} ->
@@ -163,16 +163,14 @@ handle_call({update_vc, Key, VC}, _From, KVS) ->
     {reply, ok, maps:put(Key, NewKVSValue, KVS)};
 
 
-%% TODO delete is not a delete, is a put 'deleted'
-%% TODO delete is also used by move_entries, that one should not change
-%% TODO distinguish between delete and tombstone
 handle_call({delete, Key}, _From, KVS) ->
     Reply = {deleted, maps:is_key(Key, KVS)},
     {reply, Reply, maps:remove(Key, KVS)};
 
+
 handle_call({delete_list, []}, _From, KVS) -> {reply, ok, KVS};
 
-%% TODO delete is not a delete, is a put deleted
+
 handle_call({delete_list, KeysToDelete}, _From, KVS) ->
     Remove = fun (Key, Map) -> maps:remove(Key, Map) end,
     NewKVS = lists:foldl(Remove, KVS, KeysToDelete),
@@ -200,7 +198,11 @@ handle_call({keyrange, Start, End}, _From, KVS) ->
 
 
 handle_call(numkeys, _From, KVS) ->
-    {reply, maps:size(KVS), KVS};
+    %% Filter out deleted keys
+    Real = fun(_, deleted) -> false;
+              (_, _Value)  -> true end,
+    RealKVS = maps:filter(Real, KVS),
+    {reply, maps:size(RealKVS), KVS};
 
 
 handle_call(dump, _From, KVS) ->

@@ -130,19 +130,26 @@ def cp_to_dot_vc(cp):
     clocks = [node.split(':')[1] for node in nodes]
     return ','.join(clocks)
 
-def get_key(node, key, cp=''):
+def get_key(node, key, reqcp=''):
     if VERBOSE:
-        print('GET %s cp=%s' % (key, cp))
-    res = requests.get(node['url'] + 'kvs?key=%s&causal_payload=%s' % (key, cp))
+        print('GET %s cp=%s' % (key, reqcp))
+    res = requests.get(node['url'] + 'kvs?key=%s&causal_payload=%s' % (key, reqcp))
     # print(res)
     data = res.json()
-    val, cp = data['value'], data['causal_payload']
-    if VERBOSE:
-        print(OKGREEN + 'Result: %s cp=%s' % (val, cp_to_dot_vc(cp)) + ENDC)
-    return data['value'], data['causal_payload']
+    try:
+        val, cp = data['value'], data['causal_payload']
+        if VERBOSE:
+            print(OKGREEN + 'Result: %s cp=%s' % (val, cp_to_dot_vc(cp)) + ENDC)
+        return data['value'], data['causal_payload']
+    except KeyError:
+        print(OKGREEN + 'Result: %s' % str(data) + ENDC)
+        return 'none', reqcp
+
 
 
 def put_key(node, key, value, cp):
+    global KVS
+    KVS[key] = value
     if VERBOSE:
         print('PUT node=%s key=%s value=%s cp=%s' % (node['ipport'], key, value, cp))
     res = requests.put(node['url'] + 'kvs', data={'key': key, 'value': value, 'causal_payload': cp})
@@ -153,14 +160,25 @@ def put_key(node, key, value, cp):
     return data['causal_payload']
 
 
-def del_key(node, key):
+def del_key(node, key, cp):
+    global KVS
+    KVS[key] = 'none'
     if VERBOSE:
         print('DEL %s' % key)
-    res = requests.delete(node['url'] + 'kvs?key=%s' % key)
+    res = requests.delete(node['url'] + 'kvs?key=%s&causal_payload=%s' % (key, cp))
     data = res.json()
     if VERBOSE:
         print(data)
+    return data['causal_payload']
 
+def get_key_pid(node, key, reqcp=''):
+    if VERBOSE:
+        print('GET OWNER %s cp=%s' % (key, reqcp))
+    res = requests.get(node['url'] + 'kvs?key=%s&causal_payload=%s' % (key, reqcp))
+    # print(res)
+    data = res.json()
+    print('OWNER of %s is %d' % (key, data['partition_id']))
+    return data['partition_id']
 
 def view_update(change_type, node_to_remove_idx=None):
     
@@ -231,12 +249,10 @@ def rnodeidx():
 
 
 def populate(num_key, cp='', start=0):
-    global KVS
     for i in range(start, num_key):
         key = 'key%d' % i
         val = 'val%d' % i
         cp = put_key(rnode(), key, val, cp)
-        KVS[key] = val
     return cp
 
 
@@ -637,10 +653,72 @@ def test_kvsop_after_view_changes():
 
     kill_nodes()
 
+def test_delete_key_basic():
+    global TOKENS_PER_PARTITION
+    global K
+
+    num_nodes = 7
+    num_keys  = 8 
+
+    TOKENS_PER_PARTITION = 2
+    K = 2
+
+    init_cluster(gen_view(num_nodes))
+
+    cp = populate(num_keys)
+    cp = RYW(num_keys, cp=cp)
+
+    snapshot_to_file('0init')
+    
+    del_key(rnode(), 'key1', cp)
+    del_key(rnode(), 'key4', cp)
+    del_key(rnode(), 'key6', cp)
+
+    RYW(num_keys, cp)
+
+    kill_nodes()
+
+def test_delete_key_disconnected():
+    global TOKENS_PER_PARTITION
+    global K
+
+    num_nodes = 7
+    num_keys  = 8 
+
+    TOKENS_PER_PARTITION = 2
+    K = 2
+
+    init_cluster(gen_view(num_nodes))
+
+    cp = populate(num_keys)
+    cp = RYW(num_keys, cp=cp)
+
+    snapshot_to_file('0init')
+    
+    pid = get_key_pid(rnode(), 'key3', cp)
+    print('pid', pid)
+
+    disconnect_node(NODES[pid*K])
+
+    cp = del_key(NODES[0], 'key3', cp)
+    snapshot_to_file('1del')
+
+    connect_node(NODES[pid*K])
+
+    sleep(1)
+    get_key(NODES[pid*K], 'key3', cp)
+
+    snapshot_to_file('2final')
+
+    RYW(num_keys, cp)
+
+    kill_nodes()
+
 if __name__ == '__main__':
     # test_partitions_info()
     # test_partitions()
     # test_kvsop()
     # test_7_TA()
-    test_kvsop_after_view_changes()
+    # test_kvsop_after_view_changes()
+    test_delete_key_disconnected()
 
