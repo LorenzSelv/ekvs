@@ -529,7 +529,7 @@ def test_8_TA():
     global K
 
     num_nodes = 6
-    num_keys  = 50
+    num_keys  = 150
 
     TOKENS_PER_PARTITION = 1
     K = 2

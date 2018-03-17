@@ -340,10 +340,23 @@ apply_view_change_op(_Op={remove_partition, NodeToRemove, OldPartitionID}, View 
     case NodeToRemove =:= node() of
         true -> %% I'm being deleted, move all my keys to other partitions
             KVSEntries = lab4kvs_kvstore:get_all_entries(),
-            GetKeyOwners = fun({Key, _}) -> {_H, PartID} = lab4kvs_viewutils:get_key_owner_token(Key, UpdatedTokens), 
-                                            maps:get(PartID, Partitions) end,
+            GetPartID = fun({Key, _}) -> {_H, PartID} = lab4kvs_viewutils:get_key_owner_token(Key, UpdatedTokens), 
+                                          PartID end,
             io:format("Moving ~p entries..~n", [length(KVSEntries)]),
-            [move_entry(KVSEntry, GetKeyOwners(KVSEntry)) || KVSEntry <- KVSEntries],
+            AssignEntry = fun(Entry, Map) ->
+                                  ID = GetPartID(Entry),
+                                  case maps:find(ID, Map) of
+                                      {ok, Entries} ->
+                                          maps:put(ID, Entries ++ [Entry], Map);
+                                      error ->
+                                          maps:put(ID, [Entry], Map)
+                                  end
+                          end,
+            PartIDKVSEntries = lists:foldl(AssignEntry, maps:new(), KVSEntries),
+            IDEntriesList = maps:to_list(PartIDKVSEntries),
+            IDToNodes = fun({ID, Entries}) -> {maps:get(ID, Partitions), Entries} end,
+            DestNodesEntries = lists:map(IDToNodes, IDEntriesList),
+            [move_entries_to(Entries, DestNodes) || {DestNodes, Entries} <- DestNodesEntries],
             io:format("Moved  ~p entries..~n", [length(KVSEntries)]);
         false -> %% I'm not the node being deleted, nothing to do
             io:format("I'm not the node being deleted, nothing to do ~p =/= ~p ~n", [NodeToRemove, node()])
@@ -368,7 +381,7 @@ apply_view_change_op(_Op={move_keys_merged_partition, FromID, ToID}, View = #vie
             GetKeyOwners = fun({Key, _}) -> {_H, PartID} = lab4kvs_viewutils:get_key_owner_token(Key, UpdatedTokens), 
                                             maps:get(PartID, Partitions) end,
             io:format("Moving entries..~n"),
-            [move_entry(KVSEntry, GetKeyOwners(KVSEntry)) || KVSEntry <- KVSEntries],
+            [move_entry_to(KVSEntry, GetKeyOwners(KVSEntry)) || KVSEntry <- KVSEntries],
             io:format("DONE Moving entries~n"),
             %% Send the message to all nodes in ToID partition 
             send_moved_keys_merged_to(maps:get(ToID, Partitions));
@@ -427,6 +440,12 @@ move_keyrange({Start, End}, DestNode) ->
     lab4kvs_debug:return({move_keyrange, nostate}).
 
 
+move_entries_to([], _DestNodes) -> ok;
+move_entries_to(KVSEntries, DestNodes) -> 
+    MoveEntries = fun(Node) -> move_entries(KVSEntries, Node) end,
+    lists:map(MoveEntries, DestNodes).
+
+
 move_entries([], _DestNode) -> ok;
 move_entries(KVSEntries, DestNode) when is_list(KVSEntries) ->
     %% RPC to destnode to insert the list of entries
@@ -440,7 +459,7 @@ move_entries(KVSEntries, DestNode) when is_list(KVSEntries) ->
     io:format("Moved  entries ~p to ~p~n", [KVSEntries, DestNode]).
 
 
-move_entry({Key, KVSValue}, DestNodes) ->
+move_entry_to({Key, KVSValue}, DestNodes) ->
     %% RPC to destnodes to insert the key, local call to delete the key
     %%
     io:format("Moving entry ~p to ~p~n", [{Key, KVSValue}, DestNodes]),
