@@ -141,7 +141,7 @@ handle_call({put_kvsvalue, Key, KVSValue}, _From, KVS) when is_record(KVSValue, 
     {reply, Reply, NewKVS};
 
 
-handle_call({put_list, []}, _From, KVS) -> {reply, empty, KVS};
+handle_call({put_list, []}, _From, KVS) -> {reply, ok, KVS};
 
 handle_call({put_list, KVSEntries}, _From, KVS) ->
     lab4kvs_debug:call({put_list, KVSEntries, KVS}),

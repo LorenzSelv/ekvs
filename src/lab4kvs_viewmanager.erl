@@ -273,7 +273,6 @@ apply_view_change_op(_Op={add, NodeToInsert, AffectedPartitionID}, View = #view{
             io:format("Node ~p replicates its entries ~p to ~p~n", [node(), EntriesToReplicate, NodeToInsert]),
             Res = rpc:call(NodeToInsert, lab4kvs_kvstore, put_list, [EntriesToReplicate]),
             io:format("RES ~p~n", [Res]),
-            ok = Res,
             Replicated = rpc:call(NodeToInsert, lab4kvs_kvstore, get_all_entries, []),
             io:format("~p~n", [Replicated]);
         false -> %% Nothing to do
