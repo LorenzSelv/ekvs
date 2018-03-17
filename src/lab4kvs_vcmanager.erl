@@ -40,9 +40,9 @@ start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 
-view_change(NewPartitions) ->
-    %% TODO how to compare VC after view changes
-    gen_server:call(?MODULE, {view_change, NewPartitions}).
+view_change(AllNodes) ->
+    %% Update the VC of the current node after a view change
+    gen_server:call(?MODULE, {view_change, AllNodes}).
 
 
 merge_vcs(VCs) ->
@@ -81,11 +81,8 @@ init([]) ->
     {ok, #state{vector_clock=VC}}.
 
 
-handle_call({view_change, NewPartitions}, _From, #state{vector_clock=VC}) ->
-    %% TODO pass nodes instead of partitions
-    %% TODO add call at the end of view_change
-    Nodes = lab4kvs_viewmanager:get_all_nodes(NewPartitions),
-    NewVCList = [{Node, maps:get(Node, VC, 0)} || Node <- Nodes],
+handle_call({view_change, AllNodes}, _From, #state{vector_clock=VC}) ->
+    NewVCList = [{Node, maps:get(Node, VC, 0)} || Node <- AllNodes],
     NewVC = maps:from_list(NewVCList),
     {reply, ok, #state{vector_clock=NewVC}};
 
@@ -230,13 +227,19 @@ comparable_vcs(VCs) ->
          
     
 get_merged_vcs(VCs) ->
+    lab4kvs_debug:call({get_merged_vcs, VCs}),
+    %% TODO they might be non-comparable because of view_changes
+    %% compare the view changes number, if they are equal then
+    %% perform an element wise max, otherwise pick the oldest one
     true  = comparable_vcs(VCs),
     Nodes = maps:keys(hd(VCs)),
     GetNodeClockPair = fun(Node) ->
                            Clock = lists:max([maps:get(Node, VC) || VC <- VCs]),
                            {Node, Clock} end,
     MergedVCList = lists:map(GetNodeClockPair, Nodes),
-    maps:from_list(MergedVCList).
+    MergedVC = maps:from_list(MergedVCList),
+    lab4kvs_debug:return({get_merged_vcs, MergedVC}),
+    MergedVC.
 
 
 

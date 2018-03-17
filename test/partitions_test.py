@@ -227,8 +227,8 @@ def rnodeidx():
     return random.randrange(len(NODES))
 
 
-def populate(num_key, cp=''):
-    for i in range(num_key):
+def populate(num_key, cp='', start=0):
+    for i in range(start, num_key):
         key = 'key%d' % i
         val = 'val%d' % i
         cp = put_key(rnode(), key, val, cp)
@@ -339,11 +339,11 @@ def test_7_TA():
     global TOKENS_PER_PARTITION
     global K
 
-    num_nodes = 2
-    num_keys  = 5 
+    num_nodes = 10 
+    num_keys  = 150
 
     TOKENS_PER_PARTITION = 1
-    K = 2
+    K = 5
 
     init_cluster(gen_view(num_nodes))
 
@@ -573,10 +573,37 @@ def test_8_TA():
 
     kill_nodes()
 
+
+def test_kvsop_after_view_changes():
+    global TOKENS_PER_PARTITION
+    global K
+
+    num_nodes = 3
+    num_keys  = 10
+
+    TOKENS_PER_PARTITION = 2
+    K = 2
+
+    init_cluster(gen_view(num_nodes))
+
+    populate(num_keys)
+    # assert ???num_keys == get_totnumkey()
+    cp = RYW(num_keys)
+
+    snapshot_to_file('0init')
+    
+    view_update('add')
+
+    populate(num_keys+10, start=num_keys)
+    num_keys += 10
+    RYW(num_keys, cp=cp)
+
+    kill_nodes()
+
 if __name__ == '__main__':
     # test_partitions_info()
     # test_partitions()
     # test_kvsop()
-    test_8_TA()
-
+    # test_7_TA()
+    test_kvsop_after_view_changes()
 

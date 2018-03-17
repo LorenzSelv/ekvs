@@ -100,6 +100,7 @@ handle_call({get, Key, RequestCP}, _From, KVS) ->
                                timestamp=Timestamp}} ->
                     %% TODO do not ignore request CP
                     CausalPayload = lab4kvs_vcmanager:vc_to_cp(VC),
+                    %% TODO return the merged vector clock -> causal payload
                     {ok, Value, CausalPayload, Timestamp};
                 error -> keyerror
             end,

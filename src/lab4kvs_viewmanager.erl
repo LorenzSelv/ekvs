@@ -264,6 +264,8 @@ apply_view_change(Type, NodeChanged, View) ->
     %% apply_view_change_op takes an Op and the current View and return
     %% the resulting view, used in the next foldl iteration
     NewView = lists:foldl(fun apply_view_change_op/2, View, Ops),
+    %% Update the VC of the current node
+    lab4kvs_vcmanager:view_change(get_all_nodes(NewView#view.partitions)),
     %% Make sure the partition ID is updated
     ID = lab4kvs_viewutils:get_partition_id(node(), NewView#view.partitions),
     NewView#view{partition_id=ID}.
