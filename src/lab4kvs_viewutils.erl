@@ -98,6 +98,11 @@ gen_tokens_partition(ID, TokensPerPartition) ->
 %%          create a new partition and add the node to it
 %%   - {remove, NodeToRemove, AffectedPartitionID} ->
 %%          remove the node from the partition
+%%   - {remove_partition, NodeToRemove, AffectedPartitionID} ->
+%%          remove the node from the partition
+%%          move its keys
+%%          remove the partition
+%%
 %%   - {move_keys_merged_partition, FromID, ToID} --> 
 %%          a node has been removed and two partitions can be merged, 
 %%          move all the keys from one of the two merged partitions
@@ -126,28 +131,28 @@ get_transformation_ops(remove, NodeToRemove, Partitions, K) ->
     PartitionID = get_partition_id(NodeToRemove, Partitions),
     Nodes = maps:get(PartitionID, Partitions),
 
-    %%% This should never happen
-    %% case length(Nodes) of
-    %%    1 ->  %% The node is the only one in the partition, 
-    %%          %% remove the node and the partition 
-    %%         [{remove_partition, NodeToRemove, PartitionID}];
-    
-    FirstOp = {remove, NodeToRemove, PartitionID},
-    NewPartitions = maps:put(PartitionID, Nodes -- [NodeToRemove], Partitions),
-    %% Check if there is a possibility to merge the affected partition
-    %% with another non-full one
-    case can_merge_partitions(NewPartitions, K) of
-        {true, FromID, ToID} ->
-            %% First I move all the keys from the partition to be merged
-            MoveKeys = {move_keys_merged_partition, FromID, ToID}, 
-            %% Then, move all the nodes from the From partition to
-            %% the To partition and remove the From partition
-            NodesToMove = maps:get(FromID, NewPartitions),
-            RemoveOps = [{remove, Node, FromID} || Node <- NodesToMove],
-            AddOps    = [{add,    Node, ToID}   || Node <- NodesToMove],
-            [FirstOp, MoveKeys] ++ RemoveOps ++ AddOps;
-        false ->
-            [FirstOp]
+    case length(Nodes) of
+        1 ->  %% The node is the only one in the partition, 
+              %% remove the node and the partition 
+            [{remove_partition, NodeToRemove, PartitionID}];
+        _ -> 
+            FirstOp = {remove, NodeToRemove, PartitionID},
+            NewPartitions = maps:put(PartitionID, Nodes -- [NodeToRemove], Partitions),
+            %% Check if there is a possibility to merge the affected partition
+            %% with another non-full one
+            case can_merge_partitions(NewPartitions, K) of
+                {true, FromID, ToID} ->
+                    %% First I move all the keys from the partition to be merged
+                    MoveKeys = {move_keys_merged_partition, FromID, ToID}, 
+                    %% Then, move all the nodes from the From partition to
+                    %% the To partition and remove the From partition
+                    NodesToMove = maps:get(FromID, NewPartitions),
+                    RemoveOps = [{remove, Node, FromID} || Node <- NodesToMove],
+                    AddOps    = [{add,    Node, ToID}   || Node <- NodesToMove],
+                    [FirstOp, MoveKeys] ++ RemoveOps ++ AddOps;
+                false ->
+                    [FirstOp]
+            end
     end.
 
 

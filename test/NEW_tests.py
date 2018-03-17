@@ -295,6 +295,7 @@ if __name__ == "__main__":
     network = 'lab4net'
     sudo = ''
     tests_to_run = [1,2,3,4,5,6,7,8] #  
+    # tests_to_run = [8] #  
 
     if 1 in tests_to_run:
         try: # Test 1

@@ -138,7 +138,7 @@ handle_call(all_nodes, _From, View = #view{partitions=Partitions}) ->
     {reply, Nodes, View};
 
 
-handle_call({view_change, Type, NodeChanged}, _From, View = #view{partitions=Partitions}) ->
+handle_call({view_change, Type, NodeChanged}, _From, View) ->
     %% Update the partitions: 
     %%   - a new partition is created iff all partitions have already K nodes
     %%   - a partition is deleted iff the node being deleted is the last one of the partition 
@@ -146,8 +146,7 @@ handle_call({view_change, Type, NodeChanged}, _From, View = #view{partitions=Par
     %%
     %% lab4kvs_debug:call({view_change, Type}),
     Ref = make_ref(),
-    NodesToBroadcast = case Type of add -> get_all_nodes(Partitions) ++ [NodeChanged];
-                                 remove -> get_all_nodes(Partitions) -- [NodeChanged] end,
+    NodesToBroadcast = get_node_to_broadcast(Type, NodeChanged, View),
 
     broadcast_view_change(Type, NodeChanged, Ref, NodesToBroadcast, View),
     NewView = apply_view_change(Type, NodeChanged, View),
@@ -215,6 +214,20 @@ handle_info({debug, Pid}, View) ->
 handle_info(Msg, View) ->
     io:format("Unknown message: ~p~n", [Msg]),
     {noreply, View}.
+
+
+get_node_to_broadcast(Type, NodeChanged, #view{partitions=Partitions,
+                                               replicas_per_partition=K}) ->
+    AllNodes = get_all_nodes(Partitions),
+    case Type of 
+       add    -> AllNodes ++ [NodeChanged];
+       remove -> 
+           Ops = lab4kvs_viewutils:get_transformation_ops(Type, NodeChanged, Partitions, K),
+           case Ops of
+               [{remove_partition, _, _}] -> AllNodes;
+                                         _ -> AllNodes -- [NodeChanged] 
+           end
+    end.
 
 
 broadcast_view_change(Type, NodeChanged, Ref, NodesToBroadcast, View) ->
@@ -317,6 +330,27 @@ apply_view_change_op(_Op={remove, NodeToRemove, AffectedPartitionID}, View = #vi
             View#view{partitions=NewPartitions}
     end;
 
+apply_view_change_op(_Op={remove_partition, NodeToRemove, OldPartitionID}, View = #view{partitions=Partitions,
+                                                                                        tokens=Tokens}) ->
+    %% The node has been deleted from a partition with a single node 
+    %% The partition has to be removed and its keys transferred to the other partitions
+    %% Retrieve all partition's tokens and transfer the keys to the other partitions
+    %%
+    UpdatedTokens = [{Hash, Partition} || {Hash, Partition} <- Tokens, Partition =/= OldPartitionID],
+    case NodeToRemove =:= node() of
+        true -> %% I'm being deleted, move all my keys to other partitions
+            KVSEntries = lab4kvs_kvstore:get_all_entries(),
+            GetKeyOwners = fun({Key, _}) -> {_H, PartID} = lab4kvs_viewutils:get_key_owner_token(Key, UpdatedTokens), 
+                                            maps:get(PartID, Partitions) end,
+            io:format("Moving ~p entries..~n", [length(KVSEntries)]),
+            [move_entry(KVSEntry, GetKeyOwners(KVSEntry)) || KVSEntry <- KVSEntries],
+            io:format("Moved  ~p entries..~n", [length(KVSEntries)]);
+        false -> %% I'm not the node being deleted, nothing to do
+            io:format("I'm not the node being deleted, nothing to do ~p =/= ~p ~n", [NodeToRemove, node()])
+    end,
+    NewPartitions = maps:remove(OldPartitionID, Partitions),
+    View#view{partitions=NewPartitions, tokens=UpdatedTokens};
+
 
 apply_view_change_op(_Op={move_keys_merged_partition, FromID, ToID}, View = #view{partition_id=PartitionID,
                                                                                     partitions=Partitions,
@@ -414,9 +448,7 @@ move_entry({Key, KVSValue}, DestNodes) ->
             Res = rpc:call(DestNode, lab4kvs_kvstore, put, [Key, KVSValue]),
             io:format("~p~n", [Res]),
             {ok, _, _} = Res,
-            io:format("DELETINGGGGGGGGGGGGGGGGGGGG~n"),
-            lab4kvs_kvstore:delete(Key),
-            io:format("DELETEDDDDDDDDDDDDDDDDDDDDD~n") end,
+            lab4kvs_kvstore:delete(Key) end,
     lists:map(Move, DestNodes),
     io:format("Moved entry ~p to ~p~n", [{Key, KVSValue}, DestNodes]).
 

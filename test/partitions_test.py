@@ -524,10 +524,59 @@ def test_2_TA():
     
     kill_nodes()
 
+def test_8_TA():
+    global TOKENS_PER_PARTITION
+    global K
+
+    num_nodes = 6
+    num_keys  = 50
+
+    TOKENS_PER_PARTITION = 1
+    K = 2
+
+    init_cluster(gen_view(num_nodes))
+
+    populate(num_keys)
+    # assert ???num_keys == get_totnumkey()
+    RYW(num_keys)
+
+    snapshot_to_file('0init')
+    
+    def remove(node):
+        change_type = 'remove'
+        ipport = node['ipport']
+
+        print('VIEW_UPDATE %s %s' % (change_type, ipport))
+
+        data = {'type': change_type, 'ip_port': ipport}
+        url = rnode()['url'] + 'kvs/view_update' 
+        print((url, data))
+
+        res = requests.put(url, data) 
+        print('TOT ', get_totnumkey()) 
+        get_partitions()
+
+        assert res.status_code == 200
+        RYW(num_keys)
+
+        if VERBOSE:
+            print('Result: ', res.json())
+            partition_ids = get_partition_ids(rnode())
+            print(partition_ids)
+
+    n0 = NODES[0]
+    n1 = NODES[1]
+    del NODES[0]
+    remove(n0)
+    del NODES[0]
+    remove(n1)
+
+    kill_nodes()
+
 if __name__ == '__main__':
     # test_partitions_info()
     # test_partitions()
     # test_kvsop()
-    test_2_TA()
+    test_8_TA()
 
 
