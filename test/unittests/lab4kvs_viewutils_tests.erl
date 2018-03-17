@@ -148,7 +148,7 @@ get_transformation_ops_test(5) ->
     Partitions = #{0 => [n0, n1], 1 => [n2]},
     Ops = lab4kvs_viewutils:get_transformation_ops(remove, n1, Partitions, K),
     ?assertMatch([{remove, n1, 0},
-                  {move_keys_merged_partition, 1},
+                  {move_keys_merged_partition, 1, 0},
                   {remove, n2, 1},
                   {add, n2, 0}], Ops);
 
@@ -157,7 +157,7 @@ get_transformation_ops_test(6) ->
     Partitions = #{0 => [n0, n1, n2], 1 => [n3]},
     Ops = lab4kvs_viewutils:get_transformation_ops(remove, n1, Partitions, K),
     ?assertMatch([{remove, n1, 0},
-                  {move_keys_merged_partition, 1},
+                  {move_keys_merged_partition, 1, 0},
                   {remove, n3, 1},
                   {add,    n3, 0}], Ops).
 

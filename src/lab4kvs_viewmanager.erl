@@ -319,7 +319,7 @@ apply_view_change_op(_Op={remove, NodeToRemove, AffectedPartitionID}, View = #vi
     end;
 
 
-apply_view_change_op(_Op={move_keys_merged_partition, OldPartitionID}, View = #view{partition_id=PartitionID,
+apply_view_change_op(_Op={move_keys_merged_partition, FromID, ToID}, View = #view{partition_id=PartitionID,
                                                                                     partitions=Partitions,
                                                                                     tokens=Tokens}) ->
     %% Under the assumption that a partition with a single node never dies,
@@ -327,20 +327,40 @@ apply_view_change_op(_Op={move_keys_merged_partition, OldPartitionID}, View = #v
     %% to the merged partition, it has to redistribute its own keys
     %% where they belong to in the new configuration.
     %%
-    UpdatedTokens = [{Hash, Partition} || {Hash, Partition} <- Tokens, Partition =/= OldPartitionID],
-    case OldPartitionID =:= PartitionID of
-        true -> %% I'm being merged and my old partition deleted,
-                %% move all my keys to other partitions
+    UpdatedTokens = [{Hash, Partition} || {Hash, Partition} <- Tokens, Partition =/= FromID],
+    case PartitionID of
+        FromID -> %% I'm being merged and my old partition deleted,
+                  %% move all my keys to other partitions
             KVSEntries = lab4kvs_kvstore:get_all_entries(),
             GetKeyOwners = fun({Key, _}) -> {_H, PartID} = lab4kvs_viewutils:get_key_owner_token(Key, UpdatedTokens), 
-                                           maps:get(PartID, Partitions) end,
+                                            maps:get(PartID, Partitions) end,
             io:format("Moving entries..~n"),
             [move_entry(KVSEntry, GetKeyOwners(KVSEntry)) || KVSEntry <- KVSEntries],
-            io:format("DONE Moving entries~n");
-        false -> %% I'm not the node being deleted, nothing to do
+            io:format("DONE Moving entries~n"),
+            %% Send the message to all nodes in ToID partition 
+            send_moved_keys_merged_to(maps:get(ToID, Partitions));
+        ToID ->  %% Wait for the message sent by nodes in the FromID partition
+            recv_moved_keys_merged_from(maps:get(FromID, Partitions));
+        _    ->  %% I'm not the node being deleted, nothing to do
             io:format("I do not belong to the merged partition, nothing to do ~p~n", [node()])
     end,
     View.
+
+
+send_moved_keys_merged_to(Nodes) ->
+    io:format("Sending MOVED_KEYS_MERGED to ~p~n", [Nodes]),
+    SendMsg = fun(Node) -> {view_manager, Node} ! {moved_keys_merged, node()} end,
+    [SendMsg(Node) || Node <- Nodes, Node =/= node()].
+    
+
+recv_moved_keys_merged_from(Nodes) ->
+    io:format("Waiting MOVED_KEYS_MERGED from ~p~n", [Nodes]),
+    RecvMsg = fun(_Node) ->
+                  receive 
+                    {moved_keys_merged, Sender} -> 
+                          io:format("Received moved_keys_merged from ~p~n", [Sender])
+                  end end,
+    [RecvMsg(Node) || Node <- Nodes, Node =/= node()].
 
 
 move_keys(TokenToInsert = {Hash, DestPartition}, Tokens, DestNode, PartitionID, Partitions) ->

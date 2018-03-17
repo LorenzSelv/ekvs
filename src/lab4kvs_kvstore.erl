@@ -18,7 +18,6 @@
 -export([get_numkeys/0]).
 -export([prepare_kvsvalue/3]).
 
-
 -export([dump/0]).
 
 %% Server Callbacks

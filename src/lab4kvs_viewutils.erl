@@ -98,7 +98,7 @@ gen_tokens_partition(ID, TokensPerPartition) ->
 %%          create a new partition and add the node to it
 %%   - {remove, NodeToRemove, AffectedPartitionID} ->
 %%          remove the node from the partition
-%%   - {move_keys_merged_partition, OldPartitionID} --> 
+%%   - {move_keys_merged_partition, FromID, ToID} --> 
 %%          a node has been removed and two partitions can be merged, 
 %%          move all the keys from one of the two merged partitions
 %%          to the other one
@@ -139,7 +139,7 @@ get_transformation_ops(remove, NodeToRemove, Partitions, K) ->
     case can_merge_partitions(NewPartitions, K) of
         {true, FromID, ToID} ->
             %% First I move all the keys from the partition to be merged
-            MoveKeys = {move_keys_merged_partition, FromID}, 
+            MoveKeys = {move_keys_merged_partition, FromID, ToID}, 
             %% Then, move all the nodes from the From partition to
             %% the To partition and remove the From partition
             NodesToMove = maps:get(FromID, NewPartitions),

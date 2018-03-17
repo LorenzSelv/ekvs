@@ -494,11 +494,40 @@ def test_partitions():
     kill_nodes()
 
 
+def test_2_TA():
+    global TOKENS_PER_PARTITION
+    global K
+
+    num_nodes = 4
+    num_keys  = 3
+
+    TOKENS_PER_PARTITION = 1
+    K = 2
+
+    init_cluster(gen_view(num_nodes))
+
+    # populate(num_keys)
+    # assert ???num_keys == get_totnumkey()
+    # RYW(num_keys)
+
+    snapshot_to_file('0init')
+    
+    def add(i):
+        view_update('add')
+        snapshot_to_file('%dadd' % i)
+        partition_ids = get_partition_ids(rnode())
+        print(partition_ids)
+
+    add(1) 
+    add(2) 
+    add(3) 
+    
+    kill_nodes()
 
 if __name__ == '__main__':
     # test_partitions_info()
     # test_partitions()
     # test_kvsop()
-    test_7_TA()
+    test_2_TA()
 
 

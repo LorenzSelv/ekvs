@@ -301,8 +301,8 @@ if __name__ == "__main__":
     hostname = 'localhost'
     network = 'lab4net'
     sudo = ''
-    tests_to_run = [1,2,3,4,5,6,7,8] #  
-    # tests_to_run = [7] #  
+    # tests_to_run = [1,2,3,4,5,6,7,8] #  
+    tests_to_run = [2] 
 
     if 1 in tests_to_run:
         try: # Test 1
@@ -671,15 +671,20 @@ if __name__ == "__main__":
             add_keys(hostname, nodes, keys, 1)
 
             hm = {} # Dictionary of partition and its respective nodes
-            for x in range(len(nodes)):
+            for i in range(len(nodes)):
                 part_id = get_partition_id_for_node(nodes[i])
                 if part_id not in hm:
                     hm[part_id] = []
                 hm[part_id].append(nodes[i])
 
+            print('hm', hm)
+
             l = hm.keys()
             part_id_to_be_deleted = l[0]
             other_part_id = l[1]      
+
+            print('part_id_to_be_deleted', part_id_to_be_deleted)
+
             
             #Cheking if partition to be deleted has two nodes 
             if not len(hm[part_id_to_be_deleted]) == 2:
