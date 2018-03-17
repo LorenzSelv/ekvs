@@ -99,9 +99,10 @@ handle_call({get, Key, RequestCP}, _From, KVS) ->
                                vector_clock=VC,
                                timestamp=Timestamp}} ->
                     %% TODO do not ignore request CP
-                    CausalPayload = lab4kvs_vcmanager:vc_to_cp(VC),
-                    %% TODO return the merged vector clock -> causal payload
-                    {ok, Value, CausalPayload, Timestamp};
+                    %% CausalPayload = lab4kvs_vcmanager:vc_to_cp(VC),
+                    NodeCP = lab4kvs_vcmanager:get_cp(),
+                    %% Return the vector clock of the current node
+                    {ok, Value, NodeCP, Timestamp};
                 error -> keyerror
             end,
     {reply, Reply, KVS};
@@ -164,6 +165,7 @@ handle_call({update_vc, Key, VC}, _From, KVS) ->
 
 %% TODO delete is not a delete, is a put 'deleted'
 %% TODO delete is also used by move_entries, that one should not change
+%% TODO distinguish between delete and tombstone
 handle_call({delete, Key}, _From, KVS) ->
     Reply = {deleted, maps:is_key(Key, KVS)},
     {reply, Reply, maps:remove(Key, KVS)};
@@ -232,7 +234,8 @@ resolve_put(Key, NewKVSValue, KVS) ->
     %% Given a Key and KVSValue to put in the KVS
     %% Return the ResolvedValue that should be inserted in the KVS
     %% The causal order is determined comparing
-    %% VC, Timestamp, node@<ip> in decreasing order of priority
+    %% NumViewChanges, VC, Timestamp, node@<ip> 
+    %% in decreasing order of priority
     %%
     lab4kvs_debug:call({resolve_put, NewKVSValue, KVS}),
     case maps:find(Key, KVS) of
@@ -245,18 +248,25 @@ resolve_put(Key, NewKVSValue, KVS) ->
 
 latest_kvsvalue(Va = #kvsvalue{vector_clock=VCa, timestamp=TSa},
                 Vb = #kvsvalue{vector_clock=VCb, timestamp=TSb}) ->
-    case lab4kvs_vcmanager:happens_before(VCa, VCb) of 
-        true  -> Vb;
-        false ->
-            case lab4kvs_vcmanager:happens_before(VCb, VCa) of
-                true  -> Va;
+    ViewChangesA = maps:get(view_changes, VCa),
+    ViewChangesB = maps:get(view_changes, VCb),
+    if 
+        ViewChangesA > ViewChangesB -> Va;
+        ViewChangesB > ViewChangesA -> Vb;
+        true -> %% Equal number of view changes
+            case lab4kvs_vcmanager:happens_before(VCa, VCb) of 
+                true  -> Vb;
                 false ->
-                    %% concurrent
-                    if 
-                        TSa > TSb -> Va;
-                        TSb > TSa -> Vb;
-                        %% same timestamp, pick the first one
-                        true -> Va
+                    case lab4kvs_vcmanager:happens_before(VCb, VCa) of
+                        true  -> Va;
+                        false ->
+                            %% concurrent
+                            if 
+                                TSa > TSb -> Va;
+                                TSb > TSa -> Vb;
+                                %% same timestamp, pick the first one
+                                true -> Va
+                            end
                     end
             end
     end.

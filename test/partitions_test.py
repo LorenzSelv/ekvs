@@ -579,24 +579,39 @@ def test_kvsop_after_view_changes():
     global K
 
     num_nodes = 3
-    num_keys  = 10
+    num_keys  = 50 
 
     TOKENS_PER_PARTITION = 2
-    K = 2
+    K = 3
 
     init_cluster(gen_view(num_nodes))
 
-    populate(num_keys)
+    cp = populate(num_keys)
     # assert ???num_keys == get_totnumkey()
-    cp = RYW(num_keys)
+    cp = RYW(num_keys, cp=cp)
 
     snapshot_to_file('0init')
+
+    def more_keys(delta, cp, num_keys):
+        cp = RYW(num_keys, cp=cp)
+        cp = populate(num_keys+delta, cp=cp, start=num_keys)
+        num_keys += delta
+        return RYW(num_keys, cp=cp), num_keys
     
     view_update('add')
+    cp, num_keys = more_keys(10, cp, num_keys)
 
-    populate(num_keys+10, start=num_keys)
-    num_keys += 10
-    RYW(num_keys, cp=cp)
+    view_update('add')
+    cp, num_keys = more_keys(10, cp, num_keys)
+
+    view_update('remove')
+    cp, num_keys = more_keys(10, cp, num_keys)
+
+    view_update('remove')
+    cp, num_keys = more_keys(10, cp, num_keys)
+
+    view_update('remove')
+    cp, num_keys = more_keys(10, cp, num_keys)
 
     kill_nodes()
 

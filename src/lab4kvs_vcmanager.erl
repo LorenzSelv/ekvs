@@ -60,8 +60,10 @@ new_event(CausalPayload) ->
 update_vc(VC) ->
     gen_server:call(?MODULE, {update_vc, VC}).
 
+
 get_vc() ->
     gen_server:call(?MODULE, get_vc).
+
 
 get_cp() ->
     gen_server:call(?MODULE, get_cp).
@@ -82,13 +84,15 @@ init([]) ->
 
 
 handle_call({view_change, AllNodes}, _From, #state{vector_clock=VC}) ->
+    %% Increment the number of view changes
+    ViewChanges = {view_changes, maps:get(view_changes, VC) + 1},
     NewVCList = [{Node, maps:get(Node, VC, 0)} || Node <- AllNodes],
-    NewVC = maps:from_list(NewVCList),
+    NewVC = maps:from_list(NewVCList ++ [ViewChanges]),
     {reply, ok, #state{vector_clock=NewVC}};
 
 
 handle_call({new_event, CausalPayload}, _From, #state{vector_clock=VC}) ->
-    lab4kvs_debug:call({new_event,CausalPayload}),
+    lab4kvs_debug:call({new_event,CausalPayload, VC}),
     RequestVC = cp_to_vc(CausalPayload),
     MergedVC  = get_merged_vcs([RequestVC, VC]),
     Clock = maps:get(node(), MergedVC),
@@ -162,15 +166,18 @@ get_default_vc() ->
     Nodes = lab4kvs_viewmanager:get_all_nodes(),
     %% All nodes are initialized with clock 0
     VCList = lists:map(fun(Node) -> {Node, 0} end, Nodes),
-    maps:from_list(VCList).
+    %% Number of view_changes is initialized to 0
+    maps:from_list(VCList ++ [{view_changes, 0}]).
 
 
 %% CausalPayload is a binary string in the format 
-%% <<"node@<ip1>:Clock1,node@<ip2>:Clock2">>
+%% <<"node@<ip1>:Clock1,...,node@<ipN>:ClockN,view_changes=NumViewChanges">>
 %% 
 %% VC is the map representation of that string
-%% 'node@<ip1>' => Clock1
-%% 'node@<ip2>' => Clock2
+%% 'node@<ip1>'   => Clock1
+%%   ...
+%% 'node@<ipN>'   => ClockN
+%% 'view_changes' => NumViewChanges
 %%
 
 cp_to_vc(<<"">>) -> get_default_vc();
@@ -197,7 +204,9 @@ vc_to_cp(VC) ->
 happens_before(VCa, VCb) when is_map(VCa) andalso is_map(VCb) ->
     lab4kvs_debug:call({happens_before, VCa, VCb}),
     %% Standard happens_before relationship for vector clocks
-    %%
+    %% This function should be called only if the VCa and VCb
+    %% are comparable
+    true = comparable_vcs([VCa, VCb]),
     VCaKeys = maps:keys(VCa),
     VCbKeys = maps:keys(VCb),
     %% First make sure the nodes are the same (Keys)
@@ -211,13 +220,16 @@ happens_before(VCa, VCb) when is_map(VCa) andalso is_map(VCb) ->
     Less        = lists:any(fun({Ca, Cb}) -> Ca  < Cb end, Clocks),
     LessOrEqual andalso Less.
 
+
 happens_before_or_equal(VCa, VCb) when is_map(VCa) andalso is_map(VCb) ->
     happens_before(VCa, VCb) orelse VCa =:= VCb.
 
+
+comparable_vcs([_VC]) -> true;
 comparable_vcs(VCs) ->
     %% A list of vector clocks is comparable iff all of them refer
     %% to the same set of nodes
-    io:format("Comparing VCs ~n~p~n", [VCs]),
+    io:format("comparable_vcs ? VCs ~n~p~n", [VCs]),
     VCNodesList = [maps:keys(VC) || VC <- VCs],
     VCNodes = lists:sort(hd(VCNodesList)),
     Comparable = fun(OtherVCNodes) ->
@@ -227,25 +239,30 @@ comparable_vcs(VCs) ->
          
     
 get_merged_vcs(VCs) ->
+    %% Vector Clocks might be non-comparable because of view_changes
+    %% Perform the merge only on most recent ones 
     lab4kvs_debug:call({get_merged_vcs, VCs}),
-    %% TODO they might be non-comparable because of view_changes
-    %% compare the view changes number, if they are equal then
-    %% perform an element wise max, otherwise pick the oldest one
-    true  = comparable_vcs(VCs),
-    Nodes = maps:keys(hd(VCs)),
+    ViewChanges = [maps:get(view_changes, VC) || VC <- VCs],
+    Min = lists:min(ViewChanges),
+    Max = lists:max(ViewChanges),
+    CompVCs = case Min =:= Max of
+                false ->  %% Take only the most recent vector clocks
+                    IsRecent = fun(VC) -> maps:get(view_changes, VC) =:= Max end,
+                    lists:filter(IsRecent, VCs);
+                true  -> %% All vector clocks have the same number of view_changes
+                    VCs
+              end,
+    io:format("CompsVCs ~p~n", [CompVCs]),
+    %% Make sure the vector clocks are now comparable
+    true  = comparable_vcs(CompVCs),
+    Nodes = maps:keys(hd(CompVCs)),
     GetNodeClockPair = fun(Node) ->
-                           Clock = lists:max([maps:get(Node, VC) || VC <- VCs]),
+                           Clock = lists:max([maps:get(Node, VC) || VC <- CompVCs]),
                            {Node, Clock} end,
     MergedVCList = lists:map(GetNodeClockPair, Nodes),
     MergedVC = maps:from_list(MergedVCList),
     lab4kvs_debug:return({get_merged_vcs, MergedVC}),
     MergedVC.
-
-
-
-
-
-
 
 
 
