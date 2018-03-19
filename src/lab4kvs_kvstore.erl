@@ -91,15 +91,12 @@ init(_Args) ->
     {ok, maps:new()}.
 
 
-handle_call({get, Key, RequestCP}, _From, KVS) ->
+handle_call({get, Key, _RequestCP}, _From, KVS) ->
     Reply = case maps:find(Key, KVS) of
                 {ok, #kvsvalue{value=deleted}} -> 
                     keyerror;
                 {ok, #kvsvalue{value=Value,
-                               vector_clock=VC,
                                timestamp=Timestamp}} ->
-                    %% TODO do not ignore request CP
-                    %% CausalPayload = lab4kvs_vcmanager:vc_to_cp(VC),
                     NodeCP = lab4kvs_vcmanager:get_cp(),
                     %% Return the vector clock of the current node
                     {ok, Value, NodeCP, Timestamp};
@@ -113,13 +110,6 @@ handle_call({put, Key, Value, CausalPayload}, _From, KVS) ->
     %% Update node vector clock and return it
     NewVC = lab4kvs_vcmanager:new_event(CausalPayload),
     KVSValue = prepare_kvsvalue(Key, Value, NewVC),
-    %% TODO no need to resolve
-    %% ResKVSValue = resolve_put(Key, KVSValue, KVS),
-    %% ResVC = ResKVSValue#kvsvalue.vector_clock,
-    %% ResCausalPayload = lab4kvs_vcmanager:vc_to_cp(ResVC),
-    %% ResTimestamp = ResKVSValue#kvsvalue.timestamp,
-    %% Reply = {ok, ResCausalPayload, ResTimestamp},
-    NewVC = KVSValue#kvsvalue.vector_clock, %% Assert equal
     NewCausalPayload = lab4kvs_vcmanager:vc_to_cp(NewVC),
     Timestamp = KVSValue#kvsvalue.timestamp,
     Reply = {ok, NewCausalPayload, Timestamp},

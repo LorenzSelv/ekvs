@@ -243,13 +243,13 @@ broadcast_view_change(Type, NodeChanged, Ref, NodesToBroadcast, View) ->
 wait_ack_view_change(Ref, BroadcastedNodes) -> 
     %% Wait for an ACK from every other node in the view
     %%
-    %% TODO disconnected nodes won't reply, but at least one node
-    %% per partition has to reply
     io:format("Waiting for ACK from ~p~n", [BroadcastedNodes]),
     WaitACK = fun(_Node, R) -> 
                   receive 
                       {Sender, R} -> io:format("Received ACK from ~p~n", [Sender]),
                                    ok 
+                  after
+                      2000 -> ok
                   end end,
     [WaitACK(Node, Ref) || Node <- BroadcastedNodes, Node =/= node()].
 
@@ -278,9 +278,7 @@ apply_view_change_op(_Op={add, NodeToInsert, AffectedPartitionID}, View = #view{
     %% The keys belonging to the affected partition should be replicated in the new node
     %%
     AffectedPartition = maps:get(AffectedPartitionID, Partitions),
-    %% TODO remove
-    SelectedNode = select_node(AffectedPartition),
-    case PartitionID =:= AffectedPartitionID andalso node() =:= SelectedNode of
+    case PartitionID =:= AffectedPartitionID of %% andalso node() =:= SelectedNode of
         true -> %% I belong to the affected partition and I have been 
                 %% selected to replicate my keys in the new node
             io:format("I belong to the affected partition and I have been selected to replicate my keys in the new node ~p~n", [NodeToInsert]),
@@ -291,7 +289,7 @@ apply_view_change_op(_Op={add, NodeToInsert, AffectedPartitionID}, View = #view{
             Replicated = rpc:call(NodeToInsert, lab4kvs_kvstore, get_all_entries, []),
             io:format("~p~n", [Replicated]);
         false -> %% Nothing to do
-            io:format("Node ~p replicates its key to ~p~n", [SelectedNode, NodeToInsert])
+            io:format("Node ~p replicates its key to ~p~n", [PartitionID, NodeToInsert])
     end,
     NewPartitions = maps:put(AffectedPartitionID, AffectedPartition ++ [NodeToInsert], Partitions),
     View#view{partitions=NewPartitions}; 
@@ -309,7 +307,7 @@ apply_view_change_op(_Op={add_partition, NodeToInsert, NewPartitionID}, View = #
     %% list with all the new tokens inserted is returned.
     %%
     TokensToInsert = lab4kvs_viewutils:gen_tokens_partition(NewPartitionID, TokensPerPartition),
-    Fun = fun(Token, AccTokens) -> move_keys(Token, AccTokens, NodeToInsert, PartitionID, Partitions) end,
+    Fun = fun(Token, AccTokens) -> move_keys(Token, AccTokens, NodeToInsert, PartitionID) end,
     NewPartitions = maps:put(NewPartitionID, [NodeToInsert], Partitions),
     UpdatedTokens = lists:foldl(Fun, Tokens, TokensToInsert),
     View#view{partitions=NewPartitions,tokens=UpdatedTokens};
@@ -411,15 +409,13 @@ recv_moved_keys_merged_from(Nodes) ->
     [RecvMsg(Node) || Node <- Nodes, Node =/= node()].
 
 
-move_keys(TokenToInsert = {Hash, DestPartition}, Tokens, DestNode, PartitionID, Partitions) ->
+move_keys(TokenToInsert = {Hash, DestPartition}, Tokens, DestNode, PartitionID) ->
     %% Given a new token and the list of current tokens, move some of the keys
     %% to the new node (DestNode) in the new partition (DestPartition).
     %%
     lab4kvs_debug:call(move_keys_add),
     {PrevHash, _PrevPartition} = lab4kvs_viewutils:get_prev(TokenToInsert, Tokens),
     {_NextHash, NextPartition} = lab4kvs_viewutils:get_next(TokenToInsert, Tokens),
-    %% SourceNodes = maps:get(PartitionID, Partitions),
-    %% SelectedNode = select_node(SourceNodes),
     case NextPartition =:= PartitionID andalso DestPartition =/= PartitionID of
         true  -> %% The keys to be moved to the new partition belong to my partition
             io:format("Moving keys in range ~p to ~p~n", [{PrevHash+1, Hash}, DestNode]),
@@ -478,16 +474,6 @@ get_all_nodes(Partitions) ->
     lists:append(maps:values(Partitions)).
 
 
-%% select_node_ignoring(PartitionNodes, NodeToIgnore) when is_list(PartitionNodes) ->
-    %% select_node(PartitionNodes -- [NodeToIgnore]).
-
-
-select_node(PartitionNodes) when is_list(PartitionNodes) ->
-    %% Return the node in the partition with the smaller IP address
-    %% TODO handle case of nodes unavailable in the partition
-    lists:min(PartitionNodes).
-
-
 handle_cast(Msg, State) ->
     io:format("Unknown message: ~p~n", [Msg]),
     {noreply, State}.
@@ -506,7 +492,6 @@ terminate(_Reason, _State) ->
 dump(Data) ->
     io:format("~p~n", [Data]).
 
-%% TODO update tests
 test_initstate() ->
     %% net_kernel:start(['node@10.0.0.20', longnames]),
     TokensPerPartition = 3,

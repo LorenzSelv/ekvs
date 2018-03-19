@@ -126,7 +126,7 @@ forward_kvs_query_to([Node|Nodes], get, [Key, CP]) ->
                                ?FORWARD_TIMEOUT) of
         {ok, Res} ->  %% Res = {ok, Value, CausalPayload, Timestamp} | keyerror
             Res;
-        {badrpc, timeout} ->
+        {badrpc, _} ->
             forward_kvs_query_to(Nodes, get, [Key, CP])
     end;
 
@@ -141,7 +141,6 @@ forward_kvs_query_to(Nodes, put, [Key, Value, CP]) ->
     Results = lists:map(Put, Nodes),
     io:format("Results ~p~n", [Results]),
     %% Results is a list of {ok, Result} | {badrpc, timeout} 
-    %% TODO to test with disconnected nodes
     UpNodeResultList = [{Node, Result} || 
                         {Node, {ok, Result}} <- lists:zip(Nodes, Results)],
     UpNodes = [Node || {Node, _} <- UpNodeResultList],
@@ -169,7 +168,6 @@ forward_kvs_query_to(Nodes, put, [Key, Value, CP]) ->
     DownNodes = Nodes -- UpNodes, 
     KVSValue  = lab4kvs_kvstore:prepare_kvsvalue(Key, Value, NewCP),
     AsyncPut  = fun(Node) ->
-                   %% TODO put kvsvalue does not call 'new_event'
                    async_rpc_call_until_success(Node, lab4kvs_kvstore, put, [Key, KVSValue]) end,
     lists:map(AsyncPut, DownNodes),
 

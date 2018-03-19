@@ -217,7 +217,7 @@ get_key_owner_token(Key, Tokens) ->
     get_next(FakeToken, Tokens).
 
 
-%% TODO change name from Node to Partition
+%% Note: name should be changed from Node to Partition
 
 %% Implement the tokens as a unordered list
 %% O(1) insertion of new a token 

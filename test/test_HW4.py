@@ -7,13 +7,12 @@ import os
 import subprocess
 import requests as req
 import time
-## TODO
 import traceback
 import sys
 
 NODE_COUNTER = 2
-PRINT_HTTP_REQUESTS = True
-PRINT_HTTP_RESPONSES = True
+PRINT_HTTP_REQUESTS = False
+PRINT_HTTP_RESPONSES = False
 AVAILABILITY_THRESHOLD = 1 
 TB = 5
 
@@ -52,7 +51,7 @@ def generate_random_keys(n):
 
 def send_get_request(hostname, node, key, causal_payload=''):
     d = None
-    get_str = "http://" + hostname + ":" + node.access_port + "/kvs?key=" + key + "&causal_payload=" + causal_payload 
+    get_str = "http://" + hostname + ":" + str(node.access_port) + "/kvs?key=" + key + "&causal_payload=" + causal_payload 
     try:
         if PRINT_HTTP_REQUESTS:
             print "Get request: " + get_str
@@ -87,7 +86,7 @@ def send_simple_get_request(hostname, node, key, causal_payload=''):
 
 def send_put_request(hostname, node, key, value, causal_payload=''):
     d = None
-    put_str = "http://" + hostname + ":" + node.access_port + "/kvs"
+    put_str = "http://" + hostname + ":" + str(node.access_port) + "/kvs"
     data = {'value':value, 'causal_payload':causal_payload, 'key':key}
     try:
         if PRINT_HTTP_REQUESTS:
@@ -131,7 +130,7 @@ def start_new_node(container_name, K=2, net='net', sudo='sudo'):
     print cmd_str
     node_id = subprocess.check_output(cmd_str, shell=True).rstrip('\n')
     time.sleep(5)
-    return Node(port, ip, node_id)
+    return Node(port, ip, node_id)    
 
 def add_keys(hostname, nodes, keys, value):
     d = {}
@@ -173,7 +172,6 @@ def find_node(nodes, ip_port):
     return None
 
 def disconnect_node(node, network, sudo):
-    # print('disconnecting node %s' % node.access_port)
     cmd_str = sudo + " docker network disconnect " + network + " " + node.id
     print cmd_str
     time.sleep(0.5)
@@ -237,7 +235,7 @@ def get_partition_id_for_key(node, key):
     return resp_dict['partition_id']
 
 def get_all_partitions_ids(node):
-    get_str = "http://" + hostname + ":" + node.access_port + "/kvs/get_all_partition_ids"
+    get_str = "http://" + hostname + ":" + str(node.access_port) + "/kvs/get_all_partition_ids"
     try:
         if PRINT_HTTP_REQUESTS:
             print "Get request: " + get_str
@@ -250,12 +248,12 @@ def get_all_partitions_ids(node):
                 raise Exception("Field \"" + field + "\" is not present in response " + str(d))
     except Exception as e:
         print "THE FOLLOWING GET REQUEST RESULTED IN AN ERROR: ",
-        print get_str + ' data field ' ## +  str(data) TODO 
+        print get_str 
         print e
     return d['partition_id_list'] # returns the current partition ID list of the KVS
 
 def get_partition_id_for_node(node):
-    get_str = "http://" + hostname + ":" + node.access_port + "/kvs/get_partition_id"
+    get_str = "http://" + hostname + ":" + str(node.access_port) + "/kvs/get_partition_id"
     try:
         if PRINT_HTTP_REQUESTS:
             print "Get request: " + get_str
@@ -268,16 +266,16 @@ def get_partition_id_for_node(node):
                 raise Exception("Field \"" + field + "\" is not present in response " + str(d))
     except Exception as e:
         print "THE FOLLOWING GET REQUEST RESULTED IN AN ERROR: ",
-        print get_str + ' data field ' ## +  str(data)
+        print get_str
         print e
     return d['partition_id']    
 
 def get_partition_members(node, partition_id):
-    get_str = "http://" + hostname + ":" + node.access_port + "/kvs/get_partition_members?partition_id=" + str(partition_id)
+    get_str = "http://" + hostname + ":" + str(node.access_port) + "/kvs/get_partition_members?partition_id=" + str(partition_id)
     d = None
     try:
         if PRINT_HTTP_REQUESTS:
-            print "Get request: " + get_str ## + " data " + str(data)
+            print "Get request: " + get_str
         r = req.get(get_str)
         if PRINT_HTTP_RESPONSES:
             print "Response:", r.text, r.status_code
@@ -291,31 +289,16 @@ def get_partition_members(node, partition_id):
         print e
     return d['partition_members']    
 
-def test_passed(n):
-    print(OKGREEN)
-    print('='*40)
-    print('TEST %d PASSED' % n)
-    print('='*40)
-    print(ENDC)
-
-def test_failed(n):
-    print(FAIL)
-    print('='*40)
-    print('TEST %d FAILED' % n)
-    print('='*40)
-    print(ENDC)
-
 if __name__ == "__main__":
     container_name = 'lab4erlang'
     hostname = 'localhost'
     network = 'lab4net'
     sudo = ''
-    # tests_to_run = [1,2,3,4,5,6,7] #  
-    tests_to_run = [7] #  
+    tests_to_run = [1,2,3,4,5,6,7,8] #  
 
     if 1 in tests_to_run:
         try: # Test 1
-            test_description = """Test 1: Basic functionality for obtaining information about partitions; tests the following GET requests get_all_partitions_ids, get_partition_memebrs and get_partition_id."""
+            test_description = "Test 1: Basic functionality for obtaining information about partitions; tests the following GET requests get_all_partitions_ids, get_partition_memebrs and get_partition_id."
             print HEADER + "" + test_description  + ENDC
             nodes = start_kvs(4, container_name, K=2, net=network, sudo=sudo)
             keys = generate_random_keys(60)
@@ -327,12 +310,11 @@ if __name__ == "__main__":
                 if part_id not in dist:
                     raise Exception("ERROR: No keys are added to the partition %s" % part_id)
             
-            print "Obtaining partition id for key ", keys[0]
+            print OKBLUE + "Obtaining partition id for key: " + keys[0] + ENDC
             partition_id_for_key = get_partition_id_for_key(nodes[0], keys[0])
-            print "Obtaining partition members for partition ", partition_id_for_key
+            print OKBLUE + "Obtaining partition members for partition " + str(partition_id_for_key)  + ENDC
             members = get_partition_members(nodes[0], partition_id_for_key)
             if len(members) != 2:
-                ## TODO %d instead of %s
                 raise Exception("ERROR: the size of a partition %d should be 2, but it is %d" % (partition_id_for_key, len(members)))
             
             part_nodes = []
@@ -341,19 +323,18 @@ if __name__ == "__main__":
                 if n is None:
                     raise Exception("ERROR: mismatch in the node ids (likely bug in the test script)")
                 part_nodes.append(n)
-            print "Asking nodes directly about their partition id. Information should be consistent"
+            print OKBLUE + "Asking nodes directly about their partition id. Information should be consistent" + ENDC
             for i in range(len(part_nodes)):
                 part_id = get_partition_id_for_node(part_nodes[i])
                 if part_id != partition_id_for_key:
                     raise Exception("ERRR: inconsistent information about partition ids!")
-            print "Ok, killing all the nodes in the partition ", partition_id_for_key
-            print "Verifying that we cannot access the key using other partitions"
+            print OKBLUE + "Ok, killing all the nodes in the partition " + str(partition_id_for_key) + ENDC
             for node in part_nodes:
                 stop_node(node, sudo=sudo)
             other_nodes = [n for n in nodes if n not in part_nodes]
 
-            key = keys[0]
-            get_str = "http://" + hostname + ":" + other_nodes[0].access_port + "/kvs?key=" + key + "&causal_payload=" + "" 
+            print OKBLUE + "Verifying that we cannot access the key using other partitions" + ENDC
+            get_str = "http://" + hostname + ":" + other_nodes[0].access_port + "/kvs?key=" + keys[0] + "&causal_payload=" + "" 
             if PRINT_HTTP_REQUESTS:
                 print "Get request: " + get_str
             r = req.get(get_str)
@@ -361,12 +342,10 @@ if __name__ == "__main__":
                 print "Response:", r.text, r.status_code
             if r.status_code in [200, 201, '200', '201']:
                 raise Exception("ERROR: A KEY %s SHOULD NOT BE AVAILABLE AS ITS PARTITION IS DOWN!!!" % keys[0])
-            print "OK, functionality for obtaining information about partitions looks good!"
-            test_passed(1)
+            print OKGREEN + "OK, functionality for obtaining information about partitions looks good!" + ENDC
         except Exception as e:
-            test_failed(1)
-            print "Exception in test 1"
-            print e
+            print FAIL + "Exception in test 1" + ENDC
+            print FAIL + str(e) + ENDC
             traceback.print_exc(file=sys.stdout)
         stop_all_nodes(sudo)
 
@@ -375,10 +354,10 @@ if __name__ == "__main__":
             test_description = "Test2: Node additions/deletions. A kvs consists of 2 partitions with 2 replicas each. I add 3 new nodes. The number of partitions should become 4. Then I delete a node.The number of partitions should become 3. I then delete 2 more nodes. Now the number of partitions should be back to 2." 
             print HEADER + "" + test_description  + ENDC
             print 
-            print "Starting kvs ..."
+            print OKBLUE + "Starting kvs ..." + ENDC
             nodes = start_kvs(4, container_name, K=2, net=network, sudo=sudo)
 
-            print "Adding 3 nodes"
+            print OKBLUE + "Adding 3 nodes" + ENDC
             n1 = start_new_node(container_name, K=2, net=network, sudo=sudo)
             n2 = start_new_node(container_name, K=2, net=network, sudo=sudo)
             n3 = start_new_node(container_name, K=2, net=network, sudo=sudo)
@@ -386,47 +365,45 @@ if __name__ == "__main__":
             resp_dict = add_node_to_kvs(hostname, nodes[0], n1)
             number_of_partitions = resp_dict.get('number_of_partitions')
             if number_of_partitions != 3:
-                print "ERROR: the number of partitions should be 3, but it is " + str(number_of_partitions)
+                print FAIL + "ERROR: the number of partitions should be 3, but it is " + str(number_of_partitions) + ENDC
             else:
-                print "OK, the number of partitions is 3"
+                print OKGREEN + "OK, the number of partitions is 3" + ENDC
             resp_dict = add_node_to_kvs(hostname, nodes[2], n2)
             number_of_partitions = resp_dict.get('number_of_partitions')
             if number_of_partitions != 3:
-                print "ERROR: the number of partitions should be 3, but it is " + str(number_of_partitions)
+                print FAIL + "ERROR: the number of partitions should be 3, but it is " + str(number_of_partitions) + ENDC
             else:
-                print "OK, the number of partitions is 3"
+                print OKGREEN + "OK, the number of partitions is 3" + ENDC
             resp_dict = add_node_to_kvs(hostname, n1, n3)
             number_of_partitions = resp_dict.get('number_of_partitions')
             if number_of_partitions != 4:
-                print "ERROR: the number of partitions should be 4, but it is " + str(number_of_partitions)
+                print FAIL + "ERROR: the number of partitions should be 4, but it is " + str(number_of_partitions) + ENDC
             else:
-                print "OK, the number of partitions is 4"
+                print OKGREEN + "OK, the number of partitions is 4" + ENDC
 
-            print "Deleting nodes ..."
+            print OKBLUE + "Deleting nodes ..." + ENDC
             resp_dict = delete_node_from_kvs(hostname, n3, nodes[0])
             number_of_partitions = resp_dict.get('number_of_partitions')
             if number_of_partitions != 3:
-                print "ERROR: the number of partitions should be 3, but it is " + str(number_of_partitions)
+                print FAIL + "ERROR: the number of partitions should be 3, but it is " + str(number_of_partitions) + ENDC
             else:
-                print "OK, the number of partitions is 3"
+                print OKGREEN + "OK, the number of partitions is 3" + ENDC
             resp_dict = delete_node_from_kvs(hostname, n3, nodes[2])
             number_of_partitions = resp_dict.get('number_of_partitions')
             if number_of_partitions != 3:
-                print "ERROR: the number of partitions should be 3, but it is " + str(number_of_partitions)
+                print FAIL + "ERROR: the number of partitions should be 3, but it is " + str(number_of_partitions) + ENDC
             else:
-                print "OK, the number of partitions is 3"
+                print OKGREEN + "OK, the number of partitions is 3" + ENDC
             resp_dict = delete_node_from_kvs(hostname, n3, n2)
             number_of_partitions = resp_dict.get('number_of_partitions')
             if number_of_partitions != 2:
-                print "ERROR: the number of partitions should be 2, but it is " + str(number_of_partitions)
+                print FAIL + "ERROR: the number of partitions should be 2, but it is " + str(number_of_partitions) + ENDC
             else:
-                print "OK, the number of partitions is 2"
-            print "Stopping the kvs"
-            test_passed(2)
+                print OKGREEN + "OK, the number of partitions is 2" + ENDC
+            print OKBLUE + "Stopping the kvs" + ENDC
         except Exception as e:
-            test_failed(2)
-            print "Exception in test 2"
-            print e
+            print FAIL + "Exception in test 2" + ENDC
+            print FAIL + str(e) + ENDC
             traceback.print_exc(file=sys.stdout)
         stop_all_nodes(sudo)            
 
@@ -441,12 +418,12 @@ if __name__ == "__main__":
             d = send_get_request(hostname, node2, 'dog', causal_payload=d['causal_payload'])
             if d['value'] != 'pupper':
                 raise Exception("ERROR: The kvs did not store value pupper for key dog")
-            print "Disconnecting one of the nodes..."    
+            print OKBLUE + "Disconnecting one of the nodes..." + ENDC    
             disconnect_node(node1, network, sudo)
             time.sleep(1)
-            print "Creating a new key by sending request to the other alive node"
+            print OKBLUE + "Creating a new key by sending request to the other alive node" + ENDC
             d = send_put_request(hostname, node2, 'doggo', 'pupperino', causal_payload='')
-            print "Merging the network..."    
+            print OKBLUE + "Merging the network..." + ENDC
             connect_node(node1, network, sudo)
             time.sleep(TB)
 
@@ -454,12 +431,10 @@ if __name__ == "__main__":
             if not d.has_key('value')  or d['value'] != 'pupperino':
                 raise Exception("ERROR: the kvs is not working after network healed.")
 
-            print "OK, the kvs works after we disconnected the node and connected it back."
-            test_passed(3)
+            print OKGREEN + "OK, the kvs works after we disconnected the node and connected it back." + ENDC
         except Exception as e:
-            test_failed(3)
-            print "Exception in test 3"
-            print e
+            print FAIL + "Exception in test 3" + ENDC
+            print FAIL + str(e) + ENDC
             traceback.print_exc(file=sys.stdout)
         stop_all_nodes(sudo)            
 
@@ -474,9 +449,10 @@ if __name__ == "__main__":
             partition_id = get_partition_id_for_key(nodes[0], keys[0])
             members = get_partition_members(nodes[0], partition_id)
             part_nodes = [find_node(nodes, ip_port) for ip_port in members]
-            print "key %s belongs to partition %d with nodes %s and %s" % (keys[0], partition_id, part_nodes[0], part_nodes[1])
+            print OKBLUE + "key %s belongs to partition %d with nodes %s and %s" % (keys[0], partition_id, part_nodes[0], part_nodes[1]) + ENDC
             
-            print "Disconnecting both nodes to verify that the key is unavailable"
+            time.sleep(TB) #Giving some time for sync up
+            print OKBLUE + "Disconnecting both nodes to verify that the key is unavailable" + ENDC
             disconnect_node(part_nodes[0], network, sudo)
             disconnect_node(part_nodes[1], network, sudo)
 
@@ -484,9 +460,9 @@ if __name__ == "__main__":
             r = send_simple_get_request(hostname, other_nodes[0], keys[0], causal_payload='')
             if r.status_code in [200, 201, '200', '201']:
                 raise Exception("ERROR: A KEY %s SHOULD NOT BE AVAILABLE AS ITS PARTITION IS DOWN!!!" % keys[0])
-            print "Good, the key is unavailable"
+            print OKGREEN + "Good, the key is unavailable" + ENDC
 
-            print "Connecting one node back and verifying that the key is accessible"
+            print OKBLUE + "Connecting one node back and verifying that the key is accessible" + ENDC
             connect_node(part_nodes[1], network, sudo)
             time.sleep(TB)
             r = send_simple_get_request(hostname, other_nodes[0], keys[0], causal_payload='')
@@ -494,13 +470,11 @@ if __name__ == "__main__":
             print d
             if not d.has_key('value') or int(d['value']) != -1:
                 raise Exception("ERROR: service is unavailable or the value of the key changed after the network healed")
-            print "Good, the key is available"
-            test_passed(4)
+            print OKGREEN + "Good, the key is available" + ENDC
 
         except Exception as e:
-            test_failed(4)
-            print "Exception in test 4"
-            print e
+            print FAIL + "Exception in test 4" + ENDC
+            print FAIL + str(e) + ENDC
             traceback.print_exc(file=sys.stdout)
         stop_all_nodes(sudo)
 
@@ -515,16 +489,17 @@ if __name__ == "__main__":
             partition_id = get_partition_id_for_key(nodes[0], keys[0])
             members = get_partition_members(nodes[0], partition_id)
             part_nodes = [find_node(nodes, ip_port) for ip_port in members]
-            print "key %s belongs to partition %d with nodes %s and %s" % (keys[0], partition_id, part_nodes[0], part_nodes[1])
+            print OKBLUE + "key %s belongs to partition %d with nodes %s and %s" % (keys[0], partition_id, part_nodes[0], part_nodes[1]) + ENDC
             
-            print "Disconnecting one of the nodes in the partition"
+            time.sleep(TB) #Giving some time for sync up
+            print OKBLUE + "Disconnecting one of the nodes in the partition" + ENDC
             disconnect_node(part_nodes[0], network, sudo)
 
-            print "Updating the key..."
+            print OKBLUE + "Updating the key..." + ENDC
             other_nodes = [n for n in nodes if n not in part_nodes]
             d = send_put_request(hostname, other_nodes[0],  keys[0], 17, causal_payload='')
 
-            print "Connecting back the nodeand disconnecting other node in the partition"
+            print OKBLUE + "Connecting back the node and disconnecting other node in the partition" + ENDC
             connect_node(part_nodes[0], network, sudo)
             time.sleep(TB)
             disconnect_node(part_nodes[1], network, sudo)
@@ -532,12 +507,10 @@ if __name__ == "__main__":
             d = send_get_request(hostname, other_nodes[1], keys[0], causal_payload=d['causal_payload'])
             if int(d['value']) != 17:
                 raise Exception("ERROR: THE VALUE IS STALE AFTER THE NETWORK WAS HEALED AND A %d SECOND THRESHOLD!" % TB)
-            print "OK, the value is up to date!"
-            test_passed(5)
+            print OKGREEN + "OK, the value is up to date!" + ENDC
         except Exception as e:
-            test_failed(5)
-            print "Exception in test 5"
-            print e
+            print FAIL + "Exception in test 5" + ENDC
+            print FAIL + str(e) + ENDC
             traceback.print_exc(file=sys.stdout)
         stop_all_nodes(sudo)
 
@@ -552,7 +525,7 @@ if __name__ == "__main__":
             partition_id = get_partition_id_for_key(nodes[0], keys[0])
             members = get_partition_members(nodes[0], partition_id)
             part_nodes = [find_node(nodes, ip_port) for ip_port in members]
-            print "key %s belongs to partition %d with nodes %s, %s and %s" % (keys[0], partition_id, part_nodes[0], part_nodes[1], part_nodes[2])
+            print OKBLUE + "key %s belongs to partition %d with nodes %s, %s and %s" % (keys[0], partition_id, part_nodes[0], part_nodes[1], part_nodes[2]) + ENDC
             
             r = send_simple_get_request(hostname, part_nodes[0], keys[0], causal_payload='')
             d = r.json()
@@ -561,12 +534,10 @@ if __name__ == "__main__":
             d = r.json()
             if int(d['value']) != 15:
                 raise Exception("ERROR: THE VALUE IS STALE!. DATA REPLICATION NOT IMPLEMENTED CORRECTLY")
-            print "OK, the value is up to date!"
-            test_passed(6)
+            print OKGREEN + "OK, the value is up to date!" + ENDC
         except Exception as e:
-            test_failed(6)
-            print "Exception in test 6"
-            print e
+            print FAIL + "Exception in test 6" + ENDC
+            print FAIL + str(e) + ENDC
             traceback.print_exc(file=sys.stdout)
         stop_all_nodes(sudo)
 
@@ -578,7 +549,7 @@ if __name__ == "__main__":
             keys = generate_random_keys(60)
             add_keys(hostname, nodes, keys, 1)
      
-            print "Adding 2 nodes..."
+            print OKBLUE + "Adding 2 nodes..." + ENDC
             n1 = start_new_node(container_name, K=2, net=network, sudo=sudo)
             n2 = start_new_node(container_name, K=2, net=network, sudo=sudo)
 
@@ -590,7 +561,7 @@ if __name__ == "__main__":
             if not (resp_dict1 is not None and resp_dict2 is not None and 
                 resp_dict1['msg'] == 'success' and resp_dict2['msg'] == 'success'):
                 raise Exception("Problems with adding 2 new nodes")
-            print "Nodes were successfully added."
+            print OKGREEN + "Nodes were successfully added." + ENDC
 
             hm = {} # Dictionary of partition and its respective nodes
             for i in range(len(nodes)):
@@ -599,16 +570,15 @@ if __name__ == "__main__":
                     hm[part_id] = []
                 hm[part_id].append(nodes[i])
 
-            ## Not sure what's going on here..
-            part_id1 = resp_dict1['partition_id']
+            part_id1 = resp_dict1["partition_id"]
             new_part_id = part_id1       
             if part_id1 not in hm:
                 hm[part_id1] = []
             hm[part_id1].append(n1)
-            part_id2 = resp_dict2['partition_id']
+            part_id2 = resp_dict2["partition_id"]
             hm[part_id2].append(n2)
 
-            print "Verifying that no keys were dropped..."
+            print OKBLUE + "Verifying that no keys were dropped..." + ENDC
             total_keys = 0
             for key in hm.keys():
                 get_str = "http://" + hostname + ":" + str(hm[key][0].access_port) + "/kvs/get_number_of_keys"
@@ -618,18 +588,18 @@ if __name__ == "__main__":
             if total_keys != len(keys):
                 raise Exception("Total number of keys in KVS are not equal to ones added initially")
             else:
-                print "OK, no keys were dropped after adding new nodes."
+                print OKGREEN + "OK, no keys were dropped after adding new nodes." + ENDC
 
-            print "Stopping a node."
+            print OKBLUE + "Stopping a node." + ENDC
             removed_node = hm[new_part_id].pop(0) 
             stop_node(removed_node, sudo=sudo)
-            print "Sending a request to remove the faulty node from the key-value store."
+            print OKBLUE + "Sending a request to remove the faulty node from the key-value store." + ENDC
             resp_dict = delete_node_from_kvs(hostname, nodes[0],removed_node)
             if not (resp_dict is not None and resp_dict['msg'] == 'success'):
                 raise Exception("Problems with deleting a node")
-            print "A node was successfully deleted."
+            print OKGREEN + "A node was successfully deleted." + ENDC
             
-            print "Verifying that no keys were dropped..."
+            print OKBLUE + "Verifying that no keys were dropped..." + ENDC
             total_keys = 0
             for key in hm.keys():
                 get_str = "http://" + hostname + ":" + str(hm[key][0].access_port) + "/kvs/get_number_of_keys"
@@ -639,11 +609,58 @@ if __name__ == "__main__":
             if total_keys != len(keys):
                 raise Exception("Total number of keys in KVS are not equal to ones added initially")
             else:
-                print "OK, no keys were dropped after adding new nodes."
-            test_passed(7)
+                print OKGREEN + "OK, no keys were dropped after adding new nodes." + ENDC
         except Exception as e:
-            test_failed(7)
-            print "Exception in test 7"
-            print e
+            print FAIL + "Exception in test 7" + ENDC
+            print FAIL + str(e) + ENDC
+            traceback.print_exc(file=sys.stdout)
+        stop_all_nodes(sudo)
+
+    if 8 in tests_to_run:
+        try: # Test 8
+            test_description = "Test 8: Similar to Test case 7. Here I delete a partition (2 nodes) and check if no keys are dropped."
+            print HEADER + "" + test_description  + ENDC
+            nodes = start_kvs(6, container_name, K=2, net=network, sudo=sudo)
+            keys = generate_random_keys(60)
+            add_keys(hostname, nodes, keys, 1)
+
+            hm = {} # Dictionary of partition and its respective nodes
+            for i in range(len(nodes)):
+                part_id = get_partition_id_for_node(nodes[i])
+                if part_id not in hm:
+                    hm[part_id] = []
+                hm[part_id].append(nodes[i])
+
+            l = hm.keys()
+            part_id_to_be_deleted = l[0]
+            other_part_id = l[1]      
+            
+            #Cheking if partition to be deleted has two nodes 
+            if not len(hm[part_id_to_be_deleted]) == 2:
+                raise Exception("Every partition should have had 2 nodes")
+
+            print OKBLUE + "Sending a remove node request to all nodes in partition: " + str(part_id_to_be_deleted) + ENDC
+            removed_node = hm[part_id_to_be_deleted].pop() 
+            delete_node_from_kvs(hostname, hm[other_part_id][0], removed_node)
+            time.sleep(1)
+            removed_node = hm[part_id_to_be_deleted].pop() 
+            delete_node_from_kvs(hostname, hm[other_part_id][0], removed_node)
+            time.sleep(1)
+            hm.pop(part_id_to_be_deleted) #Removing partition from Dict
+
+            print OKBLUE + "Verifying that no keys were dropped..." + ENDC
+            total_keys = 0
+            for key in hm.keys():
+                get_str = "http://" + hostname + ":" + str(hm[key][0].access_port) + "/kvs/get_number_of_keys"
+                r = req.get(get_str)
+                d = r.json()
+                total_keys = total_keys + d["count"]                
+            if total_keys != len(keys):
+                raise Exception("Total number of keys in KVS are not equal to ones added initially")
+            else:
+                print OKGREEN + "OK, no keys were removing partition." + ENDC
+        except Exception as e:
+            print FAIL + "Exception in test 8" + ENDC
+            print FAIL + str(e) + ENDC
             traceback.print_exc(file=sys.stdout)
         stop_all_nodes(sudo) 

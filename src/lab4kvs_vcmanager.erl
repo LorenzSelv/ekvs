@@ -36,7 +36,6 @@
 %%%%% Interface %%%%% 
 
 start_link() ->
-    %% TODO register server globally
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 
@@ -68,7 +67,7 @@ get_vc() ->
 get_cp() ->
     gen_server:call(?MODULE, get_cp).
 
-%% TODO remove
+
 %% broadcast_vc_to(Nodes) ->
     %% Broadcast the vector clock of the current node to all
     %% the specified nodes
@@ -118,11 +117,6 @@ handle_call(get_vc, _From, S=#state{vector_clock=VC}) ->
 handle_call(get_cp, _From, S=#state{vector_clock=VC}) ->
     {reply, vc_to_cp(VC), S}.
 
-%% handle_call({broadcast_vc_to, _Nodes}, _From, State=#state{vector_clock=VC}) ->
-    %% %% TODO
-    %% {reply, ok, State}.
-
-%% TODO handle receive broadcasted_vc
 
 handle_info({debug, Pid}, View) ->
     %% Hack to do some debug

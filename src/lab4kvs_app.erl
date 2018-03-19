@@ -26,7 +26,6 @@ start(_StartType, _StartArgs) ->
 
     %% Start the vector clock manager
     {ok, _} = lab4kvs_vcmanager:start_link(),
-    %% TODO register ?
 
     %% Define mapping routes - handlers
     Dispatch = cowboy_router:compile([

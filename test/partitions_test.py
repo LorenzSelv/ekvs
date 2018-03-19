@@ -26,6 +26,7 @@ K = 3  ## ReplicasPerPartitions
 TOKENS_PER_PARTITION = 5
 
 NODES = [] 
+CONNECTED = [] 
 
 NEXT_IDX = 0
 
@@ -71,6 +72,7 @@ def run_new_node(view=None):
             'docker_id': docker_id}
     # print(node)
     NODES.append(node)
+    CONNECTED.append(node)
 
     return node
 
@@ -224,12 +226,15 @@ def view_update(change_type, node_to_remove_idx=None):
 
 
 def get_numkey(node, i):
-    res = requests.get(node['url'] + 'kvs/get_number_of_keys')
-    data = res.json()
-    if VERBOSE:
-        print('NUMKEYS NODE %d' % i)
-        print(data)
-    return data['count']
+    try:
+        res = requests.get(node['url'] + 'kvs/get_number_of_keys')
+        data = res.json()
+        if VERBOSE:
+            print('NUMKEYS NODE %d' % i)
+            print(data)
+        return data['count']
+    except requests.exceptions.ConnectionError:
+        return 0
 
 
 def get_totnumkey():
@@ -241,7 +246,7 @@ def get_keydistribution():
 
 
 def rnode():
-    return random.choice(NODES)
+    return random.choice(CONNECTED)
 
 
 def rnodeidx():
@@ -340,6 +345,8 @@ def get_partition_members(node, partition_id):
     return data['partition_members']
 
 def disconnect_node(node):
+    global CONNECTED
+    CONNECTED.remove(node)
     if VERBOSE:
         print('DISCONNECT node ' + node['ipport'])
     docker_disconnect = "docker network disconnect lab4net " + node['docker_id']
@@ -349,6 +356,8 @@ def disconnect_node(node):
     # print(out)
 
 def connect_node(node):
+    global CONNECTED
+    CONNECTED.append(node)
     if VERBOSE:
         print('CONNECT node ' + node['ipport'])
     docker_connect = "docker network connect lab4net --ip=%s %s" % (node['ip'], node['docker_id'])
@@ -716,11 +725,96 @@ def test_delete_key_disconnected():
 
     kill_nodes()
 
+def assert_key_count():
+    global KVS
+
+    pids = get_partition_ids(rnode())
+    
+    partitions = {pid: [] for pid in pids}
+
+    for i, node in enumerate(NODES):
+        try:
+            pid = get_partition_id(node)
+            numkeys = get_numkey(node, i)
+            partitions[pid].append((node['ipport'], numkeys))
+        except Exception:
+            continue
+    
+    tot = 0
+    for pid, members in partitions.items():
+        num_keys = set([nk for n, nk in members])
+        if len(num_keys) != 1:
+            print(FAIL + "assert_key_count() failed" + ENDC)
+            print(partitions)
+            snapshot_to_file('9999failed_assert_count')
+            exit(1)
+        tot += num_keys.pop() * len(members)
+
+    totquery = get_totnumkey()
+
+    if tot != totquery:
+        print(FAIL + "assert_key_count() failed" + ENDC)
+        print("tot=%d  totquery=%d" % (tot, totquery))
+        exit(2)
+
+    print(OKGREEN + "assert_key_count() PASSED" + ENDC)
+
+
+
+def test_discon_view_change():
+    global TOKENS_PER_PARTITION
+    global K
+
+    num_nodes = 3
+    num_keys  = 30 
+
+    TOKENS_PER_PARTITION = 10
+    K = 2
+
+    init_cluster(gen_view(num_nodes))
+
+    cp = populate(num_keys)
+    cp = RYW(num_keys, cp=cp)
+
+    assert_key_count()
+
+    snapshot_to_file('0init')
+    
+    disconnect_node(NODES[0])
+
+    def more_keys(delta, cp, num_keys):
+        cp = RYW(num_keys, cp=cp)
+        cp = populate(num_keys+delta, cp=cp, start=num_keys)
+        num_keys += delta
+        return RYW(num_keys, cp=cp), num_keys
+    
+    view_update('add')
+    assert_key_count()
+
+    cp, num_keys = more_keys(10, cp, num_keys)
+    assert_key_count()
+
+    snapshot_to_file('1add')
+
+    connect_node(NODES[0])
+    sleep(2)
+
+    assert_key_count()
+    cp = RYW(num_keys, cp=cp)
+
+    snapshot_to_file('2final')
+
+    RYW(num_keys, cp)
+
+    print(get_totnumkey())
+
+    kill_nodes()
 if __name__ == '__main__':
     # test_partitions_info()
     # test_partitions()
     # test_kvsop()
     # test_7_TA()
     # test_kvsop_after_view_changes()
-    test_delete_key_disconnected()
+    # test_delete_key_disconnected()
+    test_discon_view_change()
 
