@@ -22,7 +22,7 @@
 
 
 -define(HASHALGO, md5).
--define(HASHMOD,  277).
+-define(HASHMOD,  1000007).
 
 
 hash(String) ->

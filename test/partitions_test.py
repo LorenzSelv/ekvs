@@ -814,7 +814,7 @@ if __name__ == '__main__':
     # test_partitions()
     # test_kvsop()
     # test_7_TA()
-    # test_kvsop_after_view_changes()
-    # test_delete_key_disconnected()
-    test_discon_view_change()
+    test_kvsop_after_view_changes()
+    test_delete_key_disconnected()
+    # test_discon_view_change()
 
