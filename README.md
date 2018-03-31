@@ -20,7 +20,7 @@ Build
 
 Docker Testing
 ------
-    $ cd lab4kvs
-    $ docker network create --subnet=10.0.0.0/24 lab4net
+    $ cd ekvs
+    $ docker network create --subnet=10.0.0.0/24 ekvsnet
     $ make build-docker 
     $ python3 test/distribution_test.py

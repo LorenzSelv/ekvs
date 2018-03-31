@@ -1,7 +1,7 @@
-%% lab4kvs_viewutils
+%% ekvs_viewutils
 %% Implements util functions for the view manager 
 
--module(lab4kvs_viewutils).
+-module(ekvs_viewutils).
 
 -export([hash/1]).
 -export([get_node_name/1]).

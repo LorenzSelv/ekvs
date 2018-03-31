@@ -1,12 +1,12 @@
 
 build-docker:
-	docker build -t lab4erlang .
+	docker build -t ekvs .
 
 run-docker-main:
-	docker run -p 4000:8080 --net=lab4net --ip=10.0.0.20 lab4erlang
+	docker run -p 4000:8080 --net=ekvsnet --ip=10.0.0.20 ekvs
 
 run-docker-forwarder:
-	docker run -p 4001:8080 --net=lab4net -e MAINIP=10.0.0.20:8080 lab4erlang
+	docker run -p 4001:8080 --net=ekvsnet -e MAINIP=10.0.0.20:8080 ekvs
 
 SHELL:=/bin/bash
 kill:
@@ -16,7 +16,7 @@ build-local:
 	rebar3 release
 
 run-local:
-	_build/default/rel/lab4kvs/bin/lab4kvs foreground
+	_build/default/rel/ekvs/bin/ekvs foreground
 
 tests:
 	- rm test/log/*

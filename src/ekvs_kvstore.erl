@@ -1,7 +1,7 @@
-%% lab4kvs_kvstore
+%% ekvs_kvstore
 %% gen_server implementing kvs storage
 
--module(lab4kvs_kvstore).
+-module(ekvs_kvstore).
 -behaviour(gen_server).
 
 %% API interface
@@ -97,7 +97,7 @@ handle_call({get, Key, _RequestCP}, _From, KVS) ->
                     keyerror;
                 {ok, #kvsvalue{value=Value,
                                timestamp=Timestamp}} ->
-                    NodeCP = lab4kvs_vcmanager:get_cp(),
+                    NodeCP = ekvs_vcmanager:get_cp(),
                     %% Return the vector clock of the current node
                     {ok, Value, NodeCP, Timestamp};
                 error -> keyerror
@@ -106,14 +106,14 @@ handle_call({get, Key, _RequestCP}, _From, KVS) ->
 
 
 handle_call({put, Key, Value, CausalPayload}, _From, KVS) ->
-    lab4kvs_debug:call({put, Key, Value, CausalPayload, KVS}),
+    ekvs_debug:call({put, Key, Value, CausalPayload, KVS}),
     %% Update node vector clock and return it
-    NewVC = lab4kvs_vcmanager:new_event(CausalPayload),
+    NewVC = ekvs_vcmanager:new_event(CausalPayload),
     KVSValue = prepare_kvsvalue(Key, Value, NewVC),
-    NewCausalPayload = lab4kvs_vcmanager:vc_to_cp(NewVC),
+    NewCausalPayload = ekvs_vcmanager:vc_to_cp(NewVC),
     Timestamp = KVSValue#kvsvalue.timestamp,
     Reply = {ok, NewCausalPayload, Timestamp},
-    lab4kvs_debug:return({put, Reply, maps:put(Key, KVSValue, KVS)}),
+    ekvs_debug:return({put, Reply, maps:put(Key, KVSValue, KVS)}),
     %% {reply, Reply, maps:put(Key, ResKVSValue, KVS)};
     {reply, Reply, maps:put(Key, KVSValue, KVS)};
 
@@ -122,33 +122,33 @@ handle_call({put_kvsvalue, Key, KVSValue}, _From, KVS) when is_record(KVSValue, 
     %% Resove the value against what might already be present in the KVS
     %% This function is called only for internal key transfer, 
     %% thus no new event happened
-    lab4kvs_debug:call({put_kvsvalue, Key, KVSValue}),
+    ekvs_debug:call({put_kvsvalue, Key, KVSValue}),
     ResKVSValue = resolve_put(Key, KVSValue, KVS),
     ResVC = ResKVSValue#kvsvalue.vector_clock,
-    ResCausalPayload = lab4kvs_vcmanager:vc_to_cp(ResVC),
+    ResCausalPayload = ekvs_vcmanager:vc_to_cp(ResVC),
     ResTimestamp = ResKVSValue#kvsvalue.timestamp,
     Reply = {ok, ResCausalPayload, ResTimestamp},
     NewKVS = maps:put(Key, ResKVSValue, KVS),
-    lab4kvs_debug:return({put_kvsvalue, NewKVS}),
+    ekvs_debug:return({put_kvsvalue, NewKVS}),
     {reply, Reply, NewKVS};
 
 
 handle_call({put_list, []}, _From, KVS) -> {reply, ok, KVS};
 
 handle_call({put_list, KVSEntries}, _From, KVS) ->
-    lab4kvs_debug:call({put_list, KVSEntries, KVS}),
+    ekvs_debug:call({put_list, KVSEntries, KVS}),
     Put = fun ({Key, KVSValue}, Map) ->
             ResolvedKVSValue = resolve_put(Key, KVSValue, Map),
             maps:put(Key, ResolvedKVSValue, Map) end,
     NewKVS = lists:foldl(Put, KVS, KVSEntries),
-    lab4kvs_debug:return({put_list, NewKVS}),
+    ekvs_debug:return({put_list, NewKVS}),
     {reply, ok, NewKVS};
 
 
 handle_call({update_vc, Key, VC}, _From, KVS) ->
-    lab4kvs_debug:call({update_vc, Key, VC}),
+    ekvs_debug:call({update_vc, Key, VC}),
     KVSValue = maps:get(Key, KVS),
-    true = lab4kvs_vcmanager:happens_before_or_equal(KVSValue#kvsvalue.vector_clock, VC),
+    true = ekvs_vcmanager:happens_before_or_equal(KVSValue#kvsvalue.vector_clock, VC),
     NewKVSValue = KVSValue#kvsvalue{vector_clock=VC},
     {reply, ok, maps:put(Key, NewKVSValue, KVS)};
 
@@ -229,7 +229,7 @@ resolve_put(Key, NewKVSValue, KVS) ->
     %% NumViewChanges, VC, Timestamp, node@<ip> 
     %% in decreasing order of priority
     %%
-    lab4kvs_debug:call({resolve_put, NewKVSValue, KVS}),
+    ekvs_debug:call({resolve_put, NewKVSValue, KVS}),
     case maps:find(Key, KVS) of
         {ok, KVSValue} ->
             latest_kvsvalue(KVSValue, NewKVSValue);
@@ -246,10 +246,10 @@ latest_kvsvalue(Va = #kvsvalue{vector_clock=VCa, timestamp=TSa},
         ViewChangesA > ViewChangesB -> Va;
         ViewChangesB > ViewChangesA -> Vb;
         true -> %% Equal number of view changes
-            case lab4kvs_vcmanager:happens_before(VCa, VCb) of 
+            case ekvs_vcmanager:happens_before(VCa, VCb) of 
                 true  -> Vb;
                 false ->
-                    case lab4kvs_vcmanager:happens_before(VCb, VCa) of
+                    case ekvs_vcmanager:happens_before(VCb, VCa) of
                         true  -> Va;
                         false ->
                             %% concurrent
@@ -265,12 +265,12 @@ latest_kvsvalue(Va = #kvsvalue{vector_clock=VCa, timestamp=TSa},
 
 
 prepare_kvsvalue(Key, Value, CP) when is_binary(CP)->
-    VC = lab4kvs_vcmanager:cp_to_vc(CP),
+    VC = ekvs_vcmanager:cp_to_vc(CP),
     prepare_kvsvalue(Key, Value, VC);
 
 prepare_kvsvalue(Key, Value, VC) when is_map(VC)->
-    Hash  = lab4kvs_viewutils:hash(Key),
-    Timestamp = lab4kvs_vcmanager:get_timestamp(),
+    Hash  = ekvs_viewutils:hash(Key),
+    Timestamp = ekvs_vcmanager:get_timestamp(),
     #kvsvalue{value=Value,
               hash=Hash,
               vector_clock=VC,

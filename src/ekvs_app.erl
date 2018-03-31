@@ -1,7 +1,7 @@
-%% lab4kvs_app
+%% ekvs_app
 %% Main Application
 
--module(lab4kvs_app).
+-module(ekvs_app).
 
 -behaviour(application).
 
@@ -14,30 +14,30 @@ start(_StartType, _StartArgs) ->
     io:format("node() = ~p~n", [node()]),
 
     %% Start the kvs storage server
-    {ok, _} = lab4kvs_kvstore:start_link(),
+    {ok, _} = ekvs_kvstore:start_link(),
 
     %% Start the view manager server
     View = os:getenv("VIEW", none),  %% New nodes do not have VIEW set
     ReplicasPerPartition = list_to_integer(os:getenv("K")),
     TokensPerPartition   = list_to_integer(os:getenv("TOKENSPERPARTITION", ?DEFAULT_TOKENSPERPARTITION)),
-    {ok, PidVM} = lab4kvs_viewmanager:start_link(View, TokensPerPartition, ReplicasPerPartition),
+    {ok, PidVM} = ekvs_viewmanager:start_link(View, TokensPerPartition, ReplicasPerPartition),
     %% Register the view_manager so it can receive messages from other nodes
     true = register(view_manager, PidVM),
 
     %% Start the vector clock manager
-    {ok, _} = lab4kvs_vcmanager:start_link(),
+    {ok, _} = ekvs_vcmanager:start_link(),
 
     %% Define mapping routes - handlers
     Dispatch = cowboy_router:compile([
             {'_', [
-                    {"/kvs", lab4kvs_handler, []},
-                    {"/kvs/view_update", lab4kvs_viewhandler, []},
-                    {"/kvs/get_number_of_keys", lab4kvs_keynumhandler, []},
+                    {"/kvs", ekvs_handler, []},
+                    {"/kvs/view_update", ekvs_viewhandler, []},
+                    {"/kvs/get_number_of_keys", ekvs_keynumhandler, []},
 
-                    {"/kvs/debug", lab4kvs_debug, []},
+                    {"/kvs/debug", ekvs_debug, []},
 
                     %% Partition informations handlers
-                    {"/kvs/:requested_info", lab4kvs_partitionsinfohandler, []}
+                    {"/kvs/:requested_info", ekvs_partitionsinfohandler, []}
 
                 ]}
         ]),

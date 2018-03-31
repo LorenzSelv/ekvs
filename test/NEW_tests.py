@@ -290,9 +290,9 @@ def get_partition_members(node, partition_id):
     return d['partition_members']    
 
 if __name__ == "__main__":
-    container_name = 'lab4erlang'
+    container_name = 'ekvs'
     hostname = 'localhost'
-    network = 'lab4net'
+    network = 'ekvsnet'
     sudo = ''
     tests_to_run = [1,2,3,4,5,6,7,8] #  
     # tests_to_run = [8] #  

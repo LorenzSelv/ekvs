@@ -1,8 +1,8 @@
-%% lab4kvs_vcmanager
+%% ekvs_vcmanager
 %% Implements functionalities for handling vector clocks
 %% Store the vector clock of the current node
 
--module(lab4kvs_vcmanager).
+-module(ekvs_vcmanager).
 -behaviour(gen_server).
 
 %% Server functions
@@ -91,12 +91,12 @@ handle_call({view_change, AllNodes}, _From, #state{vector_clock=VC}) ->
 
 
 handle_call({new_event, CausalPayload}, _From, #state{vector_clock=VC}) ->
-    lab4kvs_debug:call({new_event,CausalPayload, VC}),
+    ekvs_debug:call({new_event,CausalPayload, VC}),
     RequestVC = cp_to_vc(CausalPayload),
     MergedVC  = get_merged_vcs([RequestVC, VC]),
     Clock = maps:get(node(), MergedVC),
     NewVC = maps:put(node(), Clock+1, MergedVC),
-    lab4kvs_debug:return({new_event,NewVC}),
+    ekvs_debug:return({new_event,NewVC}),
     {reply, NewVC, #state{vector_clock=NewVC}};
 
 
@@ -157,7 +157,7 @@ get_timestamp() ->
 
 
 get_default_vc() ->
-    Nodes = lab4kvs_viewmanager:get_all_nodes(),
+    Nodes = ekvs_viewmanager:get_all_nodes(),
     %% All nodes are initialized with clock 0
     VCList = lists:map(fun(Node) -> {Node, 0} end, Nodes),
     %% Number of view_changes is initialized to 0
@@ -196,7 +196,7 @@ vc_to_cp(VC) ->
 
 
 happens_before(VCa, VCb) when is_map(VCa) andalso is_map(VCb) ->
-    lab4kvs_debug:call({happens_before, VCa, VCb}),
+    ekvs_debug:call({happens_before, VCa, VCb}),
     %% Standard happens_before relationship for vector clocks
     %% This function should be called only if the VCa and VCb
     %% are comparable
@@ -235,7 +235,7 @@ comparable_vcs(VCs) ->
 get_merged_vcs(VCs) ->
     %% Vector Clocks might be non-comparable because of view_changes
     %% Perform the merge only on most recent ones 
-    lab4kvs_debug:call({get_merged_vcs, VCs}),
+    ekvs_debug:call({get_merged_vcs, VCs}),
     ViewChanges = [maps:get(view_changes, VC) || VC <- VCs],
     Min = lists:min(ViewChanges),
     Max = lists:max(ViewChanges),
@@ -255,7 +255,7 @@ get_merged_vcs(VCs) ->
                            {Node, Clock} end,
     MergedVCList = lists:map(GetNodeClockPair, Nodes),
     MergedVC = maps:from_list(MergedVCList),
-    lab4kvs_debug:return({get_merged_vcs, MergedVC}),
+    ekvs_debug:return({get_merged_vcs, MergedVC}),
     MergedVC.
 
 

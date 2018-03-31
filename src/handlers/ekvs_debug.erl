@@ -1,8 +1,8 @@
-%% lab4kvs_debug
+%% ekvs_debug
 %% Debug module for taking snapshots of the view
 %% A GET request made at kvs/debug collects the state from each node and returns it
 
--module(lab4kvs_debug).
+-module(ekvs_debug).
 
 -export([init/2]).
 -export([call/1]).
@@ -17,8 +17,8 @@
 
 
 init(Req0=#{ method := <<"GET">> }, State) ->
-    KVS  = lab4kvs_kvstore:dump(),
-    View = lab4kvs_viewmanager:dump(), 
+    KVS  = ekvs_kvstore:dump(),
+    View = ekvs_viewmanager:dump(), 
     Req = cowboy_req:reply(200, ?HEADER, ?BODY_GET(KVS, View), Req0),
     {ok, Req, State}.
 

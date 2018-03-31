@@ -1,7 +1,7 @@
-%% lab4kvs_handler
+%% ekvs_handler
 %% Handler module kvs rest api
 
--module(lab4kvs_handler).
+-module(ekvs_handler).
 
 -export([init/2]).
 
@@ -90,7 +90,7 @@ init(Req0=#{ method := <<"DELETE">> }, State) ->
 %%%%%%%%%%%%%%%% Internal functions %%%%%%%%%%%%%%%%
 
 get_kvs_query(Key, RequestCP, Req0) ->
-    case lab4kvs_kvsquery:exec(get, [Key, RequestCP]) of
+    case ekvs_kvsquery:exec(get, [Key, RequestCP]) of
         {{ok, Value, CP, Timestamp}, PartitionID} ->
             Body = ?BODY_GET(Value, PartitionID, CP, Timestamp),
             cowboy_req:reply(200, ?HEADER, Body, Req0);
@@ -102,7 +102,7 @@ get_kvs_query(Key, RequestCP, Req0) ->
 
 
 put_kvs_query(Key, Value, RequestCP, Req0) ->
-    case lab4kvs_kvsquery:exec(put, [Key, Value, RequestCP]) of
+    case ekvs_kvsquery:exec(put, [Key, Value, RequestCP]) of
         {{ok, CP, Timestamp}, PartitionID} ->
             Body = ?BODY_PUT(PartitionID, CP, Timestamp),
             cowboy_req:reply(200, ?HEADER, Body, Req0); 
@@ -112,7 +112,7 @@ put_kvs_query(Key, Value, RequestCP, Req0) ->
 
 
 delete_kvs_query(Key, Payload, Req0) ->
-    case lab4kvs_kvsquery:exec(delete, [Key, Payload]) of
+    case ekvs_kvsquery:exec(delete, [Key, Payload]) of
         {{ok, CP, Timestamp}, _PartitionID} ->
             Body = ?BODY_DELETE(CP, Timestamp),
             cowboy_req:reply(200, ?HEADER, Body, Req0);

@@ -1,9 +1,9 @@
-%% lab4kvs_kvsquery
+%% ekvs_kvsquery
 %%
 %% This module runs the query in the distributed system.
 %% exec(Function, Args) is the only exported function.
 
--module(lab4kvs_kvsquery).
+-module(ekvs_kvsquery).
 
 -export([exec/2]).
 
@@ -12,12 +12,12 @@
 
 exec(Func, Args) ->
     %% Execute a query on the kvs
-    lab4kvs_debug:call({exec, Func, Args}),
+    ekvs_debug:call({exec, Func, Args}),
 
     Key = case Args of [K,_] -> K; [K,_,_] -> K end,
     
-    KeyPartitionID = lab4kvs_viewmanager:get_key_owner_id(Key),
-    PartitionNodes = lab4kvs_viewmanager:get_partition_members(KeyPartitionID),
+    KeyPartitionID = ekvs_viewmanager:get_key_owner_id(Key),
+    PartitionNodes = ekvs_viewmanager:get_partition_members(KeyPartitionID),
 
     io:format("Key owned by partition ~p~n", [KeyPartitionID]),
     
@@ -45,7 +45,7 @@ run_kvs_query_at(Nodes, get, [Key, CP]) ->
     %%
     case lists:member(node(), Nodes) of
         true  ->
-            local_call(lab4kvs_kvstore, get, [Key, CP]);
+            local_call(ekvs_kvstore, get, [Key, CP]);
         false ->
             forward_kvs_query_to(Nodes, get, [Key, CP])
     end;
@@ -76,9 +76,9 @@ run_kvs_query_at(Nodes, put, [Key, Value, CP]) ->
     %%
     case lists:member(node(), Nodes) of
         true  ->
-            ResLocal = local_call(lab4kvs_kvstore, put, [Key, Value, CP]),
+            ResLocal = local_call(ekvs_kvstore, put, [Key, Value, CP]),
             %% Forward put request to other nodes in the partition
-            NewCP = lab4kvs_vcmanager:get_cp(), 
+            NewCP = ekvs_vcmanager:get_cp(), 
             ResForward  = forward_kvs_query_to(Nodes -- [node()], put, [Key, Value, NewCP]),
             case ResForward of
                 all_disconnected ->
@@ -122,7 +122,7 @@ run_kvs_query_at(Nodes, delete, [Key, CP]) ->
 forward_kvs_query_to([], get, _) -> all_disconnected;
 forward_kvs_query_to([Node|Nodes], get, [Key, CP]) -> 
     case rpc_call_with_timeout(Node, 
-                               lab4kvs_kvstore, get, [Key, CP], 
+                               ekvs_kvstore, get, [Key, CP], 
                                ?FORWARD_TIMEOUT) of
         {ok, Res} ->  %% Res = {ok, Value, CausalPayload, Timestamp} | keyerror
             Res;
@@ -135,7 +135,7 @@ forward_kvs_query_to([Node|Nodes], get, [Key, CP]) ->
 forward_kvs_query_to([], put, _) -> all_disconnected;
 forward_kvs_query_to(Nodes, put, [Key, Value, CP]) -> 
     Put = fun(Node) -> rpc_call_with_timeout(Node, 
-                                             lab4kvs_kvstore, put, 
+                                             ekvs_kvstore, put, 
                                              [Key, Value, CP],
                                              ?FORWARD_TIMEOUT) end,
     Results = lists:map(Put, Nodes),
@@ -150,25 +150,25 @@ forward_kvs_query_to(Nodes, put, [Key, Value, CP]) ->
                         {CP, all_disconnected};
                     _ ->  %% Each UpNodeResult is {node, {ok, CP, Timestamp}}
                         io:format("UpNodesResults ~p~n", [UpNodeResultList]),
-                        VCs = [lab4kvs_vcmanager:cp_to_vc(ResCP) || 
+                        VCs = [ekvs_vcmanager:cp_to_vc(ResCP) || 
                                {_, {ok, ResCP, _}} <- UpNodeResultList],
                         io:format("VCs = ~p~n", [VCs]),
-                        MergedVC = lab4kvs_vcmanager:merge_vcs(VCs),
-                        MergedCP = lab4kvs_vcmanager:vc_to_cp(MergedVC),
+                        MergedVC = ekvs_vcmanager:merge_vcs(VCs),
+                        MergedCP = ekvs_vcmanager:vc_to_cp(MergedVC),
                         
                         io:format("MergedVC = ~p~n", [MergedVC]),
                         %% Broadcast MergedVC to all connected nodes
                         broadcast_vector_clock_to(UpNodes, Key, MergedVC),
 
-                        R = {ok, MergedCP, lab4kvs_vcmanager:get_timestamp()},  
+                        R = {ok, MergedCP, ekvs_vcmanager:get_timestamp()},  
                         {MergedCP, R}
     end,
     %% All connected nodes have an up-to-date vector clock
     %% Async RPC call until success to all disconnected nodes
     DownNodes = Nodes -- UpNodes, 
-    KVSValue  = lab4kvs_kvstore:prepare_kvsvalue(Key, Value, NewCP),
+    KVSValue  = ekvs_kvstore:prepare_kvsvalue(Key, Value, NewCP),
     AsyncPut  = fun(Node) ->
-                   async_rpc_call_until_success(Node, lab4kvs_kvstore, put, [Key, KVSValue]) end,
+                   async_rpc_call_until_success(Node, ekvs_kvstore, put, [Key, KVSValue]) end,
     lists:map(AsyncPut, DownNodes),
 
     io:format("ASYNC PUT ~p to DOWN NODES ~p~n", [KVSValue, DownNodes]),
@@ -178,15 +178,15 @@ forward_kvs_query_to(Nodes, put, [Key, Value, CP]) ->
 broadcast_vector_clock_to(UpNodes, Key, VC) ->
     %% Update the vector clock associated with the specified key in the remote KVS
     %% Update the vector clock of the remote node 
-    lab4kvs_debug:call({broadcast_vc_to, UpNodes, Key, VC}),
+    ekvs_debug:call({broadcast_vc_to, UpNodes, Key, VC}),
     UpdateVC = fun(Node) ->
                     %% rpc_call_with_timeout(Node,
-                                          %% lab4kvs_kvstore,
+                                          %% ekvs_kvstore,
                                           %% update_vc,
                                           %% [Key, VC],
                                           %% ?FORWARD_TIMEOUT),
                     rpc_call_with_timeout(Node, 
-                                          lab4kvs_vcmanager,
+                                          ekvs_vcmanager,
                                           update_vc,
                                           [VC],
                                           ?FORWARD_TIMEOUT)

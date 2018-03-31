@@ -1,7 +1,7 @@
-%% lab4kvs_viewmanager
+%% ekvs_viewmanager
 %% gen_server implementing the view manager
 
--module(lab4kvs_viewmanager).
+-module(ekvs_viewmanager).
 -behaviour(gen_server).
 
 %% API interface
@@ -84,7 +84,7 @@ get_all_nodes() ->
 view_change(Type, IPPort) when Type =:= add orelse Type =:= remove ->
     %% Broadcast message and redistribute keys.
     %% On add, return the partition id of the new node
-    Node = lab4kvs_viewutils:get_node_name(binary_to_list(IPPort)),
+    Node = ekvs_viewutils:get_node_name(binary_to_list(IPPort)),
     gen_server:call(whereis(view_manager), {view_change, Type, Node}).
 
 
@@ -97,9 +97,9 @@ dump() ->
 %%%%% Server Callbacks %%%%% 
 
 init([IPPortList, TokensPerPartition, ReplicasPerPartition]) ->
-    Partitions  = lab4kvs_viewutils:gen_partitions(IPPortList, ReplicasPerPartition),
-    PartitionID = lab4kvs_viewutils:get_partition_id(node(), Partitions),
-    Tokens      = lab4kvs_viewutils:gen_tokens(maps:size(Partitions), TokensPerPartition),
+    Partitions  = ekvs_viewutils:gen_partitions(IPPortList, ReplicasPerPartition),
+    PartitionID = ekvs_viewutils:get_partition_id(node(), Partitions),
+    Tokens      = ekvs_viewutils:gen_tokens(maps:size(Partitions), TokensPerPartition),
     {ok, #view{partition_id=PartitionID,
                partitions=Partitions,
                tokens=Tokens, 
@@ -124,12 +124,12 @@ handle_call({partition_members, ID}, _From, View = #view{partitions=Partitions})
 
 
 handle_call({keyowner, Key}, _From, View = #view{tokens=Tokens}) ->
-    {_Hash, PartitionID} = lab4kvs_viewutils:get_key_owner_token(Key, Tokens), 
+    {_Hash, PartitionID} = ekvs_viewutils:get_key_owner_token(Key, Tokens), 
     {reply, PartitionID, View};
 
 
 handle_call({keyowner_partition, Key}, _From, View = #view{tokens=Tokens}) ->
-    {_Hash, PartitionID} = lab4kvs_viewutils:get_key_owner_token(Key, Tokens), 
+    {_Hash, PartitionID} = ekvs_viewutils:get_key_owner_token(Key, Tokens), 
     {reply, PartitionID, View};
 
 
@@ -144,7 +144,7 @@ handle_call({view_change, Type, NodeChanged}, _From, View) ->
     %%   - a partition is deleted iff the node being deleted is the last one of the partition 
     %%     or two partitions can be merged
     %%
-    %% lab4kvs_debug:call({view_change, Type}),
+    %% ekvs_debug:call({view_change, Type}),
     Ref = make_ref(),
     NodesToBroadcast = get_node_to_broadcast(Type, NodeChanged, View),
 
@@ -155,12 +155,12 @@ handle_call({view_change, Type, NodeChanged}, _From, View) ->
     Reply = case Type of
                 add ->  %% On add, it should return the partition 
                         %% id of the new node
-                    lab4kvs_viewutils:get_partition_id(NodeChanged, 
+                    ekvs_viewutils:get_partition_id(NodeChanged, 
                                                        NewView#view.partitions);
                 remove ->
                     ok
             end,
-    %% lab4kvs_debug:return({view_change, Type}, NewView),
+    %% ekvs_debug:return({view_change, Type}, NewView),
     {reply, Reply, NewView};
 
 
@@ -194,7 +194,7 @@ handle_info({view_change, Type, NodeChanged, {NodeToACK, Ref}, BroadcastedView},
     io:format("Received broadcast view_change ~p ~p from ~p~n", [Type, NodeChanged, NodeToACK]),
     io:format("BroadcastedView~n~p~n", [BroadcastedView]),
 
-    ID = lab4kvs_viewutils:get_partition_id(node(), BroadcastedView#view.partitions),
+    ID = ekvs_viewutils:get_partition_id(node(), BroadcastedView#view.partitions),
     View = BroadcastedView#view{partition_id=ID},
     NewView = apply_view_change(Type, NodeChanged, View),
 
@@ -222,7 +222,7 @@ get_node_to_broadcast(Type, NodeChanged, #view{partitions=Partitions,
     case Type of 
        add    -> AllNodes ++ [NodeChanged];
        remove -> 
-           Ops = lab4kvs_viewutils:get_transformation_ops(Type, NodeChanged, Partitions, K),
+           Ops = ekvs_viewutils:get_transformation_ops(Type, NodeChanged, Partitions, K),
            case Ops of
                [{remove_partition, _, _}] -> AllNodes;
                                          _ -> AllNodes -- [NodeChanged] 
@@ -257,7 +257,7 @@ wait_ack_view_change(Ref, BroadcastedNodes) ->
 apply_view_change(Type, NodeChanged, View) ->
     Partitions = View#view.partitions,
     ReplicasPerPartition = View#view.replicas_per_partition,
-    Ops = lab4kvs_viewutils:get_transformation_ops(Type, NodeChanged, Partitions, ReplicasPerPartition),
+    Ops = ekvs_viewutils:get_transformation_ops(Type, NodeChanged, Partitions, ReplicasPerPartition),
     io:format("TRANSF OPS ~p~n", [Ops]),
     %% Apply all operations sequentially, each operation is in the format
     %% Op = {add|add_partition|remove|remove_partition, node, partition_id} 
@@ -265,9 +265,9 @@ apply_view_change(Type, NodeChanged, View) ->
     %% the resulting view, used in the next foldl iteration
     NewView = lists:foldl(fun apply_view_change_op/2, View, Ops),
     %% Update the VC of the current node
-    lab4kvs_vcmanager:view_change(get_all_nodes(NewView#view.partitions)),
+    ekvs_vcmanager:view_change(get_all_nodes(NewView#view.partitions)),
     %% Make sure the partition ID is updated
-    ID = lab4kvs_viewutils:get_partition_id(node(), NewView#view.partitions),
+    ID = ekvs_viewutils:get_partition_id(node(), NewView#view.partitions),
     NewView#view{partition_id=ID}.
 
 
@@ -282,11 +282,11 @@ apply_view_change_op(_Op={add, NodeToInsert, AffectedPartitionID}, View = #view{
         true -> %% I belong to the affected partition and I have been 
                 %% selected to replicate my keys in the new node
             io:format("I belong to the affected partition and I have been selected to replicate my keys in the new node ~p~n", [NodeToInsert]),
-            EntriesToReplicate = lab4kvs_kvstore:get_all_entries(),
+            EntriesToReplicate = ekvs_kvstore:get_all_entries(),
             io:format("Node ~p replicates its entries ~p to ~p~n", [node(), EntriesToReplicate, NodeToInsert]),
-            Res = rpc:call(NodeToInsert, lab4kvs_kvstore, put_list, [EntriesToReplicate]),
+            Res = rpc:call(NodeToInsert, ekvs_kvstore, put_list, [EntriesToReplicate]),
             io:format("RES ~p~n", [Res]),
-            Replicated = rpc:call(NodeToInsert, lab4kvs_kvstore, get_all_entries, []),
+            Replicated = rpc:call(NodeToInsert, ekvs_kvstore, get_all_entries, []),
             io:format("~p~n", [Replicated]);
         false -> %% Nothing to do
             io:format("Node ~p replicates its key to ~p~n", [PartitionID, NodeToInsert])
@@ -306,7 +306,7 @@ apply_view_change_op(_Op={add_partition, NodeToInsert, NewPartitionID}, View = #
     %% at each "iteration" using the variable AccTokens. At the end, the
     %% list with all the new tokens inserted is returned.
     %%
-    TokensToInsert = lab4kvs_viewutils:gen_tokens_partition(NewPartitionID, TokensPerPartition),
+    TokensToInsert = ekvs_viewutils:gen_tokens_partition(NewPartitionID, TokensPerPartition),
     Fun = fun(Token, AccTokens) -> move_keys(Token, AccTokens, NodeToInsert, PartitionID) end,
     NewPartitions = maps:put(NewPartitionID, [NodeToInsert], Partitions),
     UpdatedTokens = lists:foldl(Fun, Tokens, TokensToInsert),
@@ -339,8 +339,8 @@ apply_view_change_op(_Op={remove_partition, NodeToRemove, OldPartitionID}, View 
     UpdatedTokens = [{Hash, Partition} || {Hash, Partition} <- Tokens, Partition =/= OldPartitionID],
     case NodeToRemove =:= node() of
         true -> %% I'm being deleted, move all my keys to other partitions
-            KVSEntries = lab4kvs_kvstore:get_all_entries(),
-            GetPartID = fun({Key, _}) -> {_H, PartID} = lab4kvs_viewutils:get_key_owner_token(Key, UpdatedTokens), 
+            KVSEntries = ekvs_kvstore:get_all_entries(),
+            GetPartID = fun({Key, _}) -> {_H, PartID} = ekvs_viewutils:get_key_owner_token(Key, UpdatedTokens), 
                                           PartID end,
             io:format("Moving ~p entries..~n", [length(KVSEntries)]),
             AssignEntry = fun(Entry, Map) ->
@@ -377,8 +377,8 @@ apply_view_change_op(_Op={move_keys_merged_partition, FromID, ToID}, View = #vie
     case PartitionID of
         FromID -> %% I'm being merged and my old partition deleted,
                   %% move all my keys to other partitions
-            KVSEntries = lab4kvs_kvstore:get_all_entries(),
-            GetKeyOwners = fun({Key, _}) -> {_H, PartID} = lab4kvs_viewutils:get_key_owner_token(Key, UpdatedTokens), 
+            KVSEntries = ekvs_kvstore:get_all_entries(),
+            GetKeyOwners = fun({Key, _}) -> {_H, PartID} = ekvs_viewutils:get_key_owner_token(Key, UpdatedTokens), 
                                             maps:get(PartID, Partitions) end,
             io:format("Moving entries..~n"),
             [move_entry_to(KVSEntry, GetKeyOwners(KVSEntry)) || KVSEntry <- KVSEntries],
@@ -413,9 +413,9 @@ move_keys(TokenToInsert = {Hash, DestPartition}, Tokens, DestNode, PartitionID) 
     %% Given a new token and the list of current tokens, move some of the keys
     %% to the new node (DestNode) in the new partition (DestPartition).
     %%
-    lab4kvs_debug:call(move_keys_add),
-    {PrevHash, _PrevPartition} = lab4kvs_viewutils:get_prev(TokenToInsert, Tokens),
-    {_NextHash, NextPartition} = lab4kvs_viewutils:get_next(TokenToInsert, Tokens),
+    ekvs_debug:call(move_keys_add),
+    {PrevHash, _PrevPartition} = ekvs_viewutils:get_prev(TokenToInsert, Tokens),
+    {_NextHash, NextPartition} = ekvs_viewutils:get_next(TokenToInsert, Tokens),
     case NextPartition =:= PartitionID andalso DestPartition =/= PartitionID of
         true  -> %% The keys to be moved to the new partition belong to my partition
             io:format("Moving keys in range ~p to ~p~n", [{PrevHash+1, Hash}, DestNode]),
@@ -423,19 +423,19 @@ move_keys(TokenToInsert = {Hash, DestPartition}, Tokens, DestNode, PartitionID) 
         false -> %% Not my responsibility, nothing to do
             io:format("Keys are not mine or I have not been seleceted, continue")
     end,
-    lab4kvs_debug:return({move_keys_add, Tokens ++ [TokenToInsert]}),
+    ekvs_debug:return({move_keys_add, Tokens ++ [TokenToInsert]}),
     %% Update the token list to be used at the next iteration in foldl
-    lab4kvs_viewutils:insert_token(TokenToInsert, Tokens).
+    ekvs_viewutils:insert_token(TokenToInsert, Tokens).
 
 
 move_keyrange({Start, End}, DestNode) ->
     %% Move the KVS entries in the range {Start, End} to DestNode, deleting the local copy
     %%
-    lab4kvs_debug:call(move_keyrange),
-    KVSRangeEntries = lab4kvs_kvstore:get_keyrange_entries(Start, End),
+    ekvs_debug:call(move_keyrange),
+    KVSRangeEntries = ekvs_kvstore:get_keyrange_entries(Start, End),
     io:format("KVSRange ~p~n", [KVSRangeEntries]),
     move_entries(KVSRangeEntries, DestNode),
-    lab4kvs_debug:return({move_keyrange, nostate}).
+    ekvs_debug:return({move_keyrange, nostate}).
 
 
 move_entries_to([], _DestNodes) -> ok;
@@ -451,9 +451,9 @@ move_entries(KVSEntries, DestNode) when is_list(KVSEntries) ->
     %%
     io:format("Moving entries ~p to ~p~n", [KVSEntries, DestNode]),
     %% Move the entries to the new node
-    rpc:call(DestNode, lab4kvs_kvstore, put_list, [KVSEntries]),
+    rpc:call(DestNode, ekvs_kvstore, put_list, [KVSEntries]),
     %% Delete the local copy
-    lab4kvs_kvstore:delete_list([Key || {Key, _} <- KVSEntries]),
+    ekvs_kvstore:delete_list([Key || {Key, _} <- KVSEntries]),
     io:format("Moved  entries ~p to ~p~n", [KVSEntries, DestNode]).
 
 
@@ -462,10 +462,10 @@ move_entry_to({Key, KVSValue}, DestNodes) ->
     %%
     io:format("Moving entry ~p to ~p~n", [{Key, KVSValue}, DestNodes]),
     Move = fun(DestNode) ->
-            Res = rpc:call(DestNode, lab4kvs_kvstore, put, [Key, KVSValue]),
+            Res = rpc:call(DestNode, ekvs_kvstore, put, [Key, KVSValue]),
             io:format("~p~n", [Res]),
             {ok, _, _} = Res,
-            lab4kvs_kvstore:delete(Key) end,
+            ekvs_kvstore:delete(Key) end,
     lists:map(Move, DestNodes),
     io:format("Moved entry ~p to ~p~n", [{Key, KVSValue}, DestNodes]).
 
@@ -498,7 +498,7 @@ test_initstate() ->
     K = 4,
     IPPortListStr = "10.0.0.20:8080,10.0.0.21:8080,10.0.0.22:8080," ++
                     "10.0.0.23:8080,10.0.0.24:8080,10.0.0.25:8080",
-    {ok, Pid} = lab4kvs_viewmanager:start_link(IPPortListStr, TokensPerPartition, K),
+    {ok, Pid} = ekvs_viewmanager:start_link(IPPortListStr, TokensPerPartition, K),
     Pid ! {debug, self()},
     receive
         View -> dump(View)

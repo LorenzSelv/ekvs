@@ -17,8 +17,8 @@ ENDC = '\033[0m'
 
 VERBOSE = True
 
-DOCKER_RUN      = 'docker run -p %d:8080 --net=lab4net --ip=%s -e K=%d -e              "ip_port"="%s:8080" -e TOKENSPERPARTITION="%d" lab4erlang'
-DOCKER_RUN_INIT = 'docker run -p %d:8080 --net=lab4net --ip=%s -e K=%d -e VIEW="%s" -e "ip_port"="%s:8080" -e TOKENSPERPARTITION="%d" lab4erlang'
+DOCKER_RUN      = 'docker run -p %d:8080 --net=ekvsnet --ip=%s -e K=%d -e              "ip_port"="%s:8080" -e TOKENSPERPARTITION="%d" ekvs'
+DOCKER_RUN_INIT = 'docker run -p %d:8080 --net=ekvsnet --ip=%s -e K=%d -e VIEW="%s" -e "ip_port"="%s:8080" -e TOKENSPERPARTITION="%d" ekvs'
 
 URL = 'http://127.0.0.1:%d/'
 
@@ -349,7 +349,7 @@ def disconnect_node(node):
     CONNECTED.remove(node)
     if VERBOSE:
         print('DISCONNECT node ' + node['ipport'])
-    docker_disconnect = "docker network disconnect lab4net " + node['docker_id']
+    docker_disconnect = "docker network disconnect ekvsnet " + node['docker_id']
     print(docker_disconnect)
     # out = subprocess.check_output(docker_disconnect, stderr=subprocess.STDOUT, shell=True)
     os.system(docker_disconnect)
@@ -360,7 +360,7 @@ def connect_node(node):
     CONNECTED.append(node)
     if VERBOSE:
         print('CONNECT node ' + node['ipport'])
-    docker_connect = "docker network connect lab4net --ip=%s %s" % (node['ip'], node['docker_id'])
+    docker_connect = "docker network connect ekvsnet --ip=%s %s" % (node['ip'], node['docker_id'])
     print(docker_connect)
     # out = subprocess.check_output(docker_connect, stderr=subprocess.STDOUT, shell=True)
     os.system(docker_connect)

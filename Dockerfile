@@ -33,11 +33,11 @@ ENV PATH=/buildroot/erlang/20.2/bin:/buildroot/rebar3/bin:$PATH
 WORKDIR /buildroot
 
 # Copy Erlang application
-COPY . lab4kvs
+COPY . ekvs
 
 RUN mkdir /artifacts
 
-WORKDIR lab4kvs
+WORKDIR ekvs
 
 RUN rebar3 as prod release -o /artifacts
 
